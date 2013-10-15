@@ -60,6 +60,8 @@ def launch_instance(aws_access_key_id=None,
     """
     cmd = None
     import boto
+    import time
+    import os
     
     # Create a connection to EC2 service.
     # You can pass credentials in to the connect_ec2 method explicitly
