@@ -1,0 +1,11 @@
+Metadata-Version: 1.0
+Name: rdhyee-utils
+Version: 0.1dev
+Summary: Some simple methods and classes Raymond Yee developed for his own work.
+Home-page: UNKNOWN
+Author: Raymond Yee
+Author-email: raymond.yee@gmail.com
+License: Apache 2.0
+Description: Some simple methods and classes Raymond Yee developed for his own work.
+Keywords: utilities
+Platform: UNKNOWN
