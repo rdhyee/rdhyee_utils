@@ -1,5 +1,3 @@
-import boto
-
 # code adapted from http://my.safaribooksonline.com/book/-/9781449308100/2dot-ec2-recipes/id2529379
 def launch_instance(aws_access_key_id=None,
                     aws_secret_access_key=None,
@@ -61,6 +59,7 @@ def launch_instance(aws_access_key_id=None,
                passphrase.
     """
     cmd = None
+    import boto
     
     # Create a connection to EC2 service.
     # You can pass credentials in to the connect_ec2 method explicitly
