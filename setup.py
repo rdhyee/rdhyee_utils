@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 import sys, os
 
-version = '0.1.3'
+version = '0.1.4'
 
 setup(name='rdhyee_utils',
       version=version,
@@ -12,7 +12,7 @@ Some simple methods and classes Raymond Yee developed for his own work.""",
       keywords='utilities',
       author='Raymond Yee',
       author_email='raymond.yee@gmail.com',
-      url='',
+      url='https://github.com/rdhyee/rdhyee_utils',
       license='Apache 2.0',
       packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
       include_package_data=True,
