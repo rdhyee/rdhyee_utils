@@ -7,3 +7,4 @@ rdhyee_utils.egg-info/dependency_links.txt
 rdhyee_utils.egg-info/entry_points.txt
 rdhyee_utils.egg-info/not-zip-safe
 rdhyee_utils.egg-info/top_level.txt
+rdhyee_utils/aws/__init__.py
