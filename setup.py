@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 import sys, os
 
-version = '0.1.4'
+version = '0.1.5'
 
 setup(name='rdhyee_utils',
       version=version,
@@ -13,7 +13,7 @@ Some simple methods and classes Raymond Yee developed for his own work.""",
       author='Raymond Yee',
       author_email='raymond.yee@gmail.com',
       url='https://github.com/rdhyee/rdhyee_utils',
-      download_url="https://github.com/rdhyee/rdhyee_utils/tarball/0.1.4",
+      download_url="https://github.com/rdhyee/rdhyee_utils/tarball/0.1.5",
       license='Apache 2.0',
       packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
       include_package_data=True,
