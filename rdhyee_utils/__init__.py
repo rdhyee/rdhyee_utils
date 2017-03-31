@@ -20,7 +20,7 @@ def singleton(cls):
         return instances[cls]
     return getinstance
 
-def nowish_tz():
+def nowish_tz(tzname='US/Pacific'):
     # put in Pacific time
-    tz_PT = pytz.timezone("US/Pacific")
-    return datetime.datetime(*datetime.datetime.utcnow().timetuple()[:6]).replace(tzinfo=pytz.utc).astimezone(tz_PT)
+    tz = pytz.timezone(tzname)
+    return datetime.datetime(*datetime.datetime.utcnow().timetuple()[:6]).replace(tzinfo=pytz.utc).astimezone(tz)
