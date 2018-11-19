@@ -74,9 +74,9 @@ def launch_instance(aws_access_key_id=None,
     # it means that it doesn't exist and we need to create it.
     try:
         key = ec2.get_all_key_pairs(keynames=[key_name])[0]
-    except ec2.ResponseError, e:
+    except ec2.ResponseError as e:
         if e.code == 'InvalidKeyPair.NotFound':
-            print 'Creating keypair: %s' % key_name
+            print('Creating keypair: %s' % key_name)
             # Create an SSH key to use when logging into instances.
             key = ec2.create_key_pair(key_name)
             
@@ -93,9 +93,9 @@ def launch_instance(aws_access_key_id=None,
     # it means that it doesn't exist and we need to create it.
     try:
         group = ec2.get_all_security_groups(groupnames=[group_name])[0]
-    except ec2.ResponseError, e:
+    except ec2.ResponseError as e:
         if e.code == 'InvalidGroup.NotFound':
-            print 'Creating Security Group: %s' % group_name
+            print('Creating Security Group: %s' % group_name)
             # Create a security group to control access to instance via SSH.
             group = ec2.create_security_group(group_name,
                                               'A group that allows SSH access')
@@ -106,9 +106,9 @@ def launch_instance(aws_access_key_id=None,
     # on the specified port.
     try:
         group.authorize('tcp', ssh_port, ssh_port, cidr)
-    except ec2.ResponseError, e:
+    except ec2.ResponseError as e:
         if e.code == 'InvalidPermission.Duplicate':
-            print 'Security Group: %s already authorized' % group_name
+            print('Security Group: %s already authorized' % group_name)
         else:
             raise
 
@@ -129,12 +129,12 @@ def launch_instance(aws_access_key_id=None,
     # The instance has been launched but it's not yet up and
     # running.  Let's wait for its state to change to 'running'.
 
-    print 'waiting for instance'
+    print('waiting for instance')
     while instance.state != 'running':
-        print '.'
+        print('.')
         time.sleep(5)
         instance.update()
-    print 'done'
+    print('done')
 
     # Let's tag the instance with the specified label so we can
     # identify it later.
