@@ -14,6 +14,10 @@ from oauth2client import client
 from oauth2client import tools
 from oauth2client.file import Storage
 
+# will need to replace apiclient with googleapiclient
+from googleapiclient.discovery import build
+
+
 import argparse
 
 flags = argparse.Namespace()
@@ -78,9 +82,15 @@ def get_credentials(
 
 
 def get_service(name, version, credentials):
-
     http = credentials.authorize(httplib2.Http())
     service = apiclient.discovery.build(name, version, http=http)
+    return service
+
+
+def get_service_2(name, version, credentials, static_discovery=False):
+    service = build(
+        name, version, credentials=credentials, static_discovery=static_discovery
+    )
     return service
 
 
@@ -89,7 +99,6 @@ class DriveService(object):
         self.service = get_service("drive", version, credentials)
 
     def folders_by_name(self, folder_name):
-
         page_token = None
         while True:
             q = "name='{}' and mimeType = 'application/vnd.google-apps.folder'".format(
@@ -141,7 +150,6 @@ class DriveService(object):
                 break
 
     def move_file_to_folder(self, file_id, folder_id):
-
         # Retrieve the existing parents to remove
         file = self.service.files().get(fileId=file_id, fields="parents").execute()
         previous_parents = ",".join(file.get("parents"))
@@ -158,7 +166,6 @@ class DriveService(object):
         )
 
     def create_folder(self, name):
-
         file_metadata = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
         file = self.service.files().create(body=file_metadata, fields="id").execute()
         return file
@@ -189,7 +196,6 @@ class SheetsService(object):
     # https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets#SpreadsheetProperties
 
     def create_spreadsheet(self, properties):
-
         spreadsheet_body = properties
 
         request = self.service.spreadsheets().create(body=spreadsheet_body)
@@ -197,7 +203,6 @@ class SheetsService(object):
         return response
 
     def spreadsheet_properties(self, title, sheet0_title):
-
         return {
             "properties": {"title": title},
             "sheets": [
@@ -214,7 +219,6 @@ class SheetsService(object):
         }
 
     def add_sheet(self, spreadsheet_id, sheet_title):
-
         addSheet_props = {"properties": {"title": sheet_title}}
 
         body = {"requests": [{"addSheet": addSheet_props}]}
@@ -228,7 +232,6 @@ class SheetsService(object):
         return result
 
     def delete_sheet(self, spreadsheet_id, sheetId):
-
         body = {"requests": [{"deleteSheet": {"sheetId": sheetId}}]}
 
         result = (
@@ -247,7 +250,6 @@ class SheetsService(object):
         valueRenderOption="UNFORMATTED_VALUE",
         dateTimeRenderOption="FORMATTED_STRING",
     ):
-
         result = (
             self.service.spreadsheets()
             .values()
@@ -291,7 +293,6 @@ class A1Utils(object):
 
     @staticmethod
     def columnToLetter(column):
-
         letter = ""
 
         column = int(column)
@@ -307,8 +308,8 @@ class A1Utils(object):
     def letterToColumn(letter):
         column = 0
 
-        for (i, l) in enumerate(letter[::-1]):
-            column += (ord(l) - ord("A") + 1) * 26 ** i
+        for i, l in enumerate(letter[::-1]):
+            column += (ord(l) - ord("A") + 1) * 26**i
 
         return column
 
@@ -338,7 +339,6 @@ class A1Utils(object):
         )
 
         for r in ss_metadata["namedRanges"]:
-
             range_name = r["name"]
             range_ = r["range"]
 
@@ -377,7 +377,6 @@ def apply_locale(n):
 
 
 def test_hello():
-
     assert True
 
 
@@ -410,7 +409,6 @@ def test_basic_sheet_scenario():
 
 
 def test_expected_keys_in_spreadsheet_metadata():
-
     credentials = get_credentials(
         "sheets.googleapis.com-python-quickstart.json",
         "sandbox exploration",
@@ -462,7 +460,6 @@ def test_drive_service():
 
 
 def test_write_query():
-
     # https://docs.google.com/spreadsheets/d/1McPdxcvGyGKrkuje5N80uIHG-IEW6j9qx-9Dr3GIsL0/edit#gid=0
     spreadsheet_id = SANDBOX_ID
     rangeName = "My Sheet 1!A16"
