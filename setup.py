@@ -1,12 +1,13 @@
 from setuptools import setup, find_packages
-import sys, os
 
-version = "0.1.11"
+version = "0.1.12"
 
 setup(
     name="rdhyee_utils",
     version=version,
-    description="Some simple methods and classes Raymond Yee developed for his own work.",
+    description=(
+        "Some simple methods and classes Raymond Yee developed " "for his own work."
+    ),
     long_description="""\
 Some simple methods and classes Raymond Yee developed for his own work.""",
     classifiers=[],  # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
@@ -14,7 +15,7 @@ Some simple methods and classes Raymond Yee developed for his own work.""",
     author="Raymond Yee",
     author_email="raymond.yee@gmail.com",
     url="https://github.com/rdhyee/rdhyee_utils",
-    download_url="https://github.com/rdhyee/rdhyee_utils/tarball/0.1.11",
+    download_url=f"https://github.com/rdhyee/rdhyee_utils/tarball/{version}",
     license="Apache 2.0",
     packages=find_packages(exclude=["ez_setup", "examples", "tests"]),
     include_package_data=True,

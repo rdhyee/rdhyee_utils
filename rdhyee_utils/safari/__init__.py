@@ -62,11 +62,11 @@ class SafariTab(object):
         return self.rawtab.source()
 
     @property
-    def URL(self):
+    def url(self):
         return self.rawtab.URL()
 
-    @URL.setter
-    def URL(self, url):
+    @url.setter
+    def url(self, url):
         self.rawtab.URL.set(url)
 
     @property
@@ -81,7 +81,7 @@ class SafariTab(object):
     def visible(self):
         return self.rawtab.visible()
 
-    def do_JavaScript(self, js):
+    def do_javascript(self, js):
         return self.rawtab.do_JavaScript(js)
 
     def close(self, saving=k.no, saving_in=None):
