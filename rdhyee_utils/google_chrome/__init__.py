@@ -51,7 +51,7 @@ class GoogleChromeTab(object):
         return self.rawtab.loading()
 
     def execute(self, js):
-        return self.rawtab.execute(js)
+        return self.rawtab.execute(javascript=js)
 
     def view_source(self):
         return self.rawtab.view_source()
