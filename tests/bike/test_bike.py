@@ -13,7 +13,7 @@ from pathlib import Path as P
 p = P(__file__).parents[2]
 sys.path.append(str(p))  # noqa: E402
 
-from rdhyee_utils.bike import Bike
+from rdhyee_utils.bike import Bike  # noqa: E402
 
 
 def test_divide_by_zero() -> None:

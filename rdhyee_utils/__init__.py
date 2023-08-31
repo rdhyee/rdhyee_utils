@@ -1,4 +1,16 @@
-__all__ = ["grouper", "singleton", "nowish_tz", "aws", "google_chrome"]
+__all__ = [
+    "grouper",
+    "singleton",
+    "nowish_tz",
+    "aws",
+    "bike",
+    "google_apis",
+    "google_chrome",
+    "mail",
+    "safari",
+    "selenium",
+]
+
 
 # http://stackoverflow.com/questions/2348317/how-to-write-a-pager-for-python-iterators/2350904#2350904
 def grouper(iterable, page_size):

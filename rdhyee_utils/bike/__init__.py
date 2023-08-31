@@ -10,6 +10,42 @@ ascript = """
 """
 
 
+def _to_raw(obj):
+    if isinstance(obj, BikeRow):
+        return obj.rawrow
+    elif isinstance(obj, BikeDocument):
+        return obj.rawdoc
+    elif isinstance(obj, BikeRichText):
+        return obj.rawrichtext
+    elif isinstance(obj, BikeWindow):
+        return obj.rawwindow
+    else:
+        return obj
+
+
+class BikeRow(object):
+    def __init__(self, bike, rawrow):
+        self.bike = bike
+        self.rawrow = rawrow
+        self.read_only = ["text_content", "level"]
+
+    def __getattr__(self, name):
+        if name in self.read_only:
+            attr = getattr(self.rawrow, name)
+            return attr()
+        else:
+            raise AttributeError(f"Can't set attribute {name} on BikeRow")
+
+
+class BikeRichText(object):
+    def __init__(self, bike, rawrichtext):
+        self.bike = bike
+        self.rawrichtext = rawrichtext
+
+    def __getattr__(self, name):
+        return getattr(self.rawrichtext, name)
+
+
 class BikeDocument(object):
     def __init__(self, bike, rawdoc):
         self.bike = bike
@@ -32,7 +68,7 @@ class BikeDocument(object):
 
     @property
     def root_row(self):
-        return self.rawdoc.root_row()
+        return BikeRow(self.bike, self.rawdoc.root_row())
 
     @property
     def entire_contents(self):
@@ -46,6 +82,10 @@ class BikeDocument(object):
     def file(self):
         return self.rawdoc.file()
 
+    @property
+    def selection_row(self):
+        return BikeRow(self.bike, self.rawdoc.selection_row())
+
     def close(self, saving=k.yes, saving_in=None):
         self.rawdoc.close(saving=saving, saving_in=saving_in)
 
@@ -55,9 +95,19 @@ class BikeDocument(object):
     def print_(self, print_dialog=k.yes, with_properties=None):
         self.rawdoc.print_(print_dialog=print_dialog, with_properties=with_properties)
 
-    def export(self, as_=k.plain_text_format, all=True):
+    def export(self, as_=k.plain_text_format, from_=None, all: bool = True):
+        """
+        all: Export all contained rows (true) or only the given rows (false). Defaults to true
+        TO DO: figure out how to use from_, which is a list of rows
+        """
         assert as_ in (k.plain_text_format, k.OPML_format, k.bike_format)
-        return self.rawdoc.export(as_=as_, all=all)
+        if from_ is not None:
+            assert isinstance(from_, list)
+            return self.rawdoc.export(
+                as_=as_, from_=[_to_raw(obj) for obj in from_], all=all
+            )
+        else:
+            return self.rawdoc.export(as_=as_, all=all)
 
 
 class BikeWindow(object):
@@ -76,8 +126,12 @@ class BikeWindow(object):
     def name(self):
         try:
             return self.rawwindow.name()
-        except:
+        except Exception:
             return ""
+
+    @property
+    def document(self):
+        return BikeDocument(self.bike, self.rawwindow.document())
 
 
 class Bike(object):
