@@ -3,7 +3,12 @@ for bike
 """
 
 import applescript
-from appscript import app, k, its
+from appscript import app, k, its, mactypes
+from pathlib import Path as P
+
+import lxml
+import lxml.etree as ET
+from lxml.html import parse, fromstring, tostring, HtmlElement
 
 ascript = """
 
@@ -27,7 +32,7 @@ class BikeRow(object):
     def __init__(self, bike, rawrow):
         self.bike = bike
         self.rawrow = rawrow
-        self.read_only = ["text_content", "level"]
+        self.read_only = ["level"]
 
     def __getattr__(self, name):
         if name in self.read_only:
@@ -35,6 +40,14 @@ class BikeRow(object):
             return attr()
         else:
             raise AttributeError(f"Can't set attribute {name} on BikeRow")
+
+    @property
+    def text_content(self):
+        return self.rawrow.text_content()
+
+    @text_content.setter
+    def text_content(self, text):
+        self.rawrow.text_content.set(text)
 
 
 class BikeRichText(object):
@@ -98,7 +111,6 @@ class BikeDocument(object):
     def export(self, as_=k.plain_text_format, from_=None, all: bool = True):
         """
         all: Export all contained rows (true) or only the given rows (false). Defaults to true
-        TO DO: figure out how to use from_, which is a list of rows
         """
         assert as_ in (k.plain_text_format, k.OPML_format, k.bike_format)
         if from_ is not None:
@@ -108,6 +120,26 @@ class BikeDocument(object):
             )
         else:
             return self.rawdoc.export(as_=as_, all=all)
+
+    def lxml_html(self, from_=None, all: bool = True) -> lxml.html.HtmlElement:
+        """
+
+        all: Export all contained rows (true) or only the given rows (false). Defaults to true
+        """
+        doc_bike = self.export(as_=k.bike_format, from_=from_, all=all)
+        html = fromstring(doc_bike.encode("utf-8"))
+        return html
+
+    def lxml_etree(self, from_=None, all: bool = True) -> ET.ElementTree:
+        """
+
+        all: Export all contained rows (true) or only the given rows (false). Defaults to true
+        """
+        doc_bike = self.export(as_=k.bike_format, from_=from_, all=all)
+        etree = ET.fromstring(
+            doc_bike.encode("utf-8"), ET.XMLParser(remove_blank_text=True)
+        )
+        return etree
 
 
 class BikeWindow(object):
@@ -168,6 +200,9 @@ class Bike(object):
     @property
     def documents(self):
         return [BikeDocument(self, d) for d in self.app.documents()]
+
+    def open(self, path: P):
+        self.app.open(mactypes.Alias(path))
 
 
 def main():

@@ -1,7 +1,11 @@
 __ALL__ = ["PasteboardTypes", "Pasteboard", "PTYPES", "GeneralPasteboard"]
 
+import plistlib
+from typing import Any, Union, Optional
+
 import AppKit
 from AppKit import NSPasteboard, NSPasteboardItem, NSData
+
 
 # hardcoded instead of trying to dynamically elicit the list from AppKit
 PTYPES = (
@@ -25,6 +29,16 @@ PTYPES = (
     "NSPasteboardTypeTextFinderOptions",
     "NSPasteboardTypeURL",
 )
+
+# abbreviations for UTIs for property list types
+
+BINARY_PROPERTY_LIST = "com.apple.binary-property-list"
+XML_PROPERTY_LIST = "com.apple.xml-property-list"
+
+PLIST_UTI_FMT = {
+    BINARY_PROPERTY_LIST: plistlib.FMT_BINARY,
+    XML_PROPERTY_LIST: plistlib.FMT_XML,
+}
 
 
 def singleton(cls):
@@ -102,11 +116,19 @@ class PasteboardItem:
         data = NSData.dataWithBytes_length_(data, len(data))
         self.item.setData_forType_(data, t)
 
-    def get_property_list(self, t: str = "public.json"):
-        return self.item.propertyListForType_(t)
+    def get_property_list(self, t: str = BINARY_PROPERTY_LIST):
+        data = self.item.propertyListForType_(t)
+        if t in (BINARY_PROPERTY_LIST, XML_PROPERTY_LIST):
+            return PropertyList(data)
+        else:
+            return data
 
-    def set_property_list(self, plist, t: str = "public.json"):
-        self.item.setPropertyList_forType_(plist, t)
+    def set_property_list(self, plist, t: str = BINARY_PROPERTY_LIST):
+        if t in (BINARY_PROPERTY_LIST, XML_PROPERTY_LIST):
+            data = plist.dumps(fmt=PLIST_UTI_FMT[t])
+        else:
+            data = plist
+        self.item.setPropertyList_forType_(data, t)
 
     def set_from_content_list(self, content_list):
         for uti, content in content_list:
@@ -116,6 +138,50 @@ class PasteboardItem:
             elif isinstance(content, bytes):
                 # Set binary data content
                 self.set_data(content, uti)
+            elif isinstance(content, PropertyList):
+                # Set property list content
+                self.set_property_list(content, uti)
+
+
+class PropertyList:
+    def __init__(self, data: Union[bytes, dict]) -> None:
+        """
+        Initialize a PropertyList object by loading plist data.
+
+        :param data: plist data in bytes or a Python dict
+        """
+        self.loads(data)
+
+    def loads(self, data: Union[bytes, dict]) -> Any:
+        """
+        Load plist data.
+
+        :param data: plist data in bytes or a Python dict
+        :return: parsed plist data
+        """
+        if isinstance(data, bytes):
+            try:
+                self.plist_data = plistlib.loads(data)
+            except Exception as e:
+                raise ValueError(f"Unable to parse plist data: {e}")
+        elif isinstance(data, dict):
+            self.plist_data = data
+        else:
+            raise ValueError("Invalid data type. Data should be bytes or dict.")
+        return self.plist_data
+
+    def dumps(self, fmt: Optional[Union[int, str]] = plistlib.FMT_BINARY) -> bytes:
+        """
+        Dump plist data to bytes.
+
+        :param fmt: Format to use for dumping. Options are plistlib.FMT_BINARY or plistlib.FMT_XML
+        :return: plist data in bytes
+        """
+        if fmt not in (plistlib.FMT_BINARY, plistlib.FMT_XML):
+            raise ValueError(
+                "Invalid format. Use plistlib.FMT_BINARY or plistlib.FMT_XML."
+            )
+        return plistlib.dumps(self.plist_data, fmt=fmt)
 
 
 class GeneralPasteboard(Pasteboard):
@@ -128,13 +194,12 @@ class GeneralPasteboard(Pasteboard):
     def get_data(self, t: str = ptypes.ABBR_TYPES["String"]) -> bytes | None:
         return self.pb.dataForType_(t)
 
-    def get_property_list(self, t: str = ptypes.ABBR_TYPES["String"]):
-        """
-        TO DO: figure out what property lists are
-        Returns a property list for the specified type, or None if the
-        receiver does not contain data of the specified type.
-        """
-        return self.pb.propertyListForType_(t)
+    def get_property_list(self, t: str = BINARY_PROPERTY_LIST):
+        data = self.pb.propertyListForType_(t)
+        if t in (BINARY_PROPERTY_LIST, XML_PROPERTY_LIST):
+            return PropertyList(data)
+        else:
+            return data
 
     def set_content(self, content_list: list[PasteboardItem]):
         # Clear existing contents

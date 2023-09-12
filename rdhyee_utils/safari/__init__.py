@@ -81,6 +81,14 @@ class SafariTab(object):
     def visible(self):
         return self.rawtab.visible()
 
+    def activate(self):
+        """
+        activate the tab: make this tab the current one in the window
+
+        """
+        self.window.current_tab = self
+        self.app.activate()
+
     def do_javascript(self, js):
         return self.rawtab.do_JavaScript(js)
 
@@ -179,6 +187,10 @@ class SafariWindow(object):
     @property
     def current_tab(self):
         return SafariTab(self.app, self.window_id, self.rawwindow.current_tab())
+
+    @current_tab.setter
+    def current_tab(self, tab):
+        self.rawwindow.current_tab.set(tab.rawtab)
 
 
 class Safari:

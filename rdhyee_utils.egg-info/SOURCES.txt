@@ -16,6 +16,7 @@ rdhyee_utils/clipboard/__init__.py
 rdhyee_utils/clipboard/macos/__init__.py
 rdhyee_utils/google_apis/__init__.py
 rdhyee_utils/google_chrome/__init__.py
+rdhyee_utils/google_chrome/chrome.py
 rdhyee_utils/safari/__init__.py
 rdhyee_utils/selenium/__init__.py
 tests/test_base.py
