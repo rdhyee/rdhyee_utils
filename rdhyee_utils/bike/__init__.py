@@ -10,6 +10,9 @@ import lxml
 import lxml.etree as ET
 from lxml.html import parse, fromstring, tostring, HtmlElement
 
+from typing import Union
+
+
 ascript = """
 
 """
@@ -32,7 +35,7 @@ class BikeRow(object):
     def __init__(self, bike, rawrow):
         self.bike = bike
         self.rawrow = rawrow
-        self.read_only = ["level"]
+        self.read_only = ["level", "id"]
 
     def __getattr__(self, name):
         if name in self.read_only:
@@ -42,12 +45,24 @@ class BikeRow(object):
             raise AttributeError(f"Can't set attribute {name} on BikeRow")
 
     @property
+    def name(self):
+        return self.rawrow.name()
+
+    @name.setter
+    def name(self, name):
+        self.rawrow.name.set(name)
+
+    @property
     def text_content(self):
         return self.rawrow.text_content()
 
     @text_content.setter
     def text_content(self, text):
         self.rawrow.text_content.set(text)
+
+    @property
+    def rows(self):
+        return [BikeRow(self.bike, r) for r in self.rawrow.rows()]
 
 
 class BikeRichText(object):
@@ -92,8 +107,16 @@ class BikeDocument(object):
         return self.rawdoc.modified()
 
     @property
-    def file(self):
-        return self.rawdoc.file()
+    def file(self) -> Union[P, None]:
+        f = self.rawdoc.file()
+        if isinstance(f, mactypes.File):
+            return P(f.path)
+        else:
+            return None
+
+    @property
+    def rows(self):
+        return [BikeRow(self.bike, r) for r in self.rawdoc.rows()]
 
     @property
     def selection_row(self):

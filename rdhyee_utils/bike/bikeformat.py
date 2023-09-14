@@ -24,7 +24,6 @@ from panflute import (
     OrderedList,
     HorizontalRule,
     BlockQuote,
-    Quoted,
     Note,
     CodeBlock,
     Code,
@@ -191,24 +190,8 @@ def keep_clusters(clusters, filter_func=lambda x: True):
     return filtered_clusters
 
 
-# ul contains li (only); attribute id
-# li contains p (for the text) and optionally a ul; attribute id -- and optionally data-type, data-done
-# p contains text and optionally a span, a, mark, em, strong, -- rich text tags
-
-# looking for runs of ordered, unordered -- wrap in OrderedList, BulletList.
-# handle task list items
-
-# key thing: sometimes expansion of children means mapping to contained elements, sometime it means mapping to siblings
-
-
-# wrap elements in a list if it's not a ListItem
 def wrap_in_list_item(lst):
     return [e if isinstance(e, ListItem) else ListItem(e) for e in lst]
-
-
-# map p elements (with contained rich text) to pandoc Para element
-
-# mark: https://pandoc.org/MANUAL.html#highlighting
 
 
 def rich_text(xhtml, flatten=False, wrap_para=False) -> list["panflute.Element"]:
@@ -252,11 +235,12 @@ def rich_text(xhtml, flatten=False, wrap_para=False) -> list["panflute.Element"]
         return [(Str(text_content(xhtml)))]
 
 
-def bike_etree_to_panflute(xhtml, heading_level=1):
+def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
     if xhtml.tag == f"{NS}html":
         body = xhtml.find(f"{NS}body")
-        meta = {}
-        content = bike_etree_to_panflute(body)
+        if meta is None:
+            meta = {}
+        content = bike_etree_to_panflute(body, heading_level, meta=meta)
         return Doc(*content, metadata=meta, format="html")
     elif xhtml.tag == f"{NS}body":
         id_ = xhtml.find(f"{NS}ul").attrib["id"]
@@ -274,13 +258,6 @@ def bike_etree_to_panflute(xhtml, heading_level=1):
             clusters,
             lambda c: c[0].attrib.get("data-type") in ["ordered", "unordered", "task"],
         )
-
-        # look for runs of ordered, unordered, task
-        # handle as singletons: body, heading, hr, note, quote (I think)
-        # heading will require context of heading level
-        # code runs are complicated: children and sibling expansion
-        # wrappers for ordered, unordered
-        #  {'code', 'heading', 'hr', 'note', 'ordered', 'quote', 'task', 'unordered', None},
 
         contents = []
         for cluster in clusters:
@@ -339,7 +316,6 @@ def bike_etree_to_panflute(xhtml, heading_level=1):
             # contents.append( Para(Note(Plain(Str(p_text)))))
             contents.append(Para(Note(Plain(*rich_text_elements))))
         elif data_type == "quote":
-            # contents.append(Plain(Quoted(p_elem)))
             contents.append((BlockQuote(Para(*rich_text_elements))))
         elif data_type == "task":
             task_done = xhtml.attrib.get("data-done", False)
