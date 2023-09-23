@@ -1,40 +1,73 @@
 import subprocess
-from pathlib import Path as P
+from pathlib import Path
+from typing import Dict, List, Set, Optional
 
 
-def run_cmd(*args, shell=True, cwd=None):
-    r = subprocess.run(*args, shell=shell, capture_output=True, cwd=cwd)
-    return r
+def run_cmd(
+    cmd: str, shell: bool = True, cwd: Optional[Path] = None
+) -> subprocess.CompletedProcess:
+    """
+    Run a shell command and return the result.
+    :param cmd: The shell command to run.
+    :param shell: Whether to use shell=True for subprocess.
+    :param cwd: The current working directory for the command.
+    :return: subprocess.CompletedProcess object.
+    """
+    return subprocess.run(cmd, shell=shell, capture_output=True, cwd=cwd)
 
 
-def pandoc_formats():
-    cmd = "pandoc --list-input-formats"
-    r = run_cmd(cmd, shell=True, cwd=P.cwd())
-    input_formats = set([f for f in r.stdout.decode("utf-8").split("\n") if f != ""])
+def pandoc_formats() -> Dict[str, Set[str]]:
+    """
+    Get available pandoc input and output formats.
 
-    cmd = "pandoc --list-output-formats"
-    r = run_cmd(cmd, shell=True, cwd=P.cwd())
-    output_formats = set([f for f in r.stdout.decode("utf-8").split("\n") if f != ""])
+    :return: A dictionary with keys 'input' and 'output' containing sets of input and output formats.
+    """
+    cwd = Path.cwd()  # Get the current working directory
 
+    # Get input formats
+    input_formats = set(
+        _parse_pandoc_list(run_cmd("pandoc --list-input-formats", cwd=cwd).stdout)
+    )
+
+    # Get output formats
+    output_formats = set(
+        _parse_pandoc_list(run_cmd("pandoc --list-output-formats", cwd=cwd).stdout)
+    )
+
+    # Return the formats as a dictionary
     return {"input": input_formats, "output": output_formats}
 
 
-def extensions_for_format(fmt):
+def _parse_pandoc_list(pandoc_output: bytes) -> List[str]:
+    """
+    Helper function to parse the output of pandoc list commands.
+    :param pandoc_output: The bytes output from a pandoc list command.
+    :return: A list of available formats or extensions.
+    """
+    return [f for f in pandoc_output.decode("utf-8").split("\n") if f != ""]
+
+
+def extensions_for_format(fmt: str) -> Dict[str, Set[str]]:
+    """
+    Get the enabled and disabled extensions for a given Pandoc format.
+
+    :param fmt: The Pandoc format (e.g., 'markdown').
+    :return: A dictionary with keys 'enabled', 'disabled', and 'all' containing sets of extensions.
+    """
+    cwd = Path.cwd()
     cmd = f"pandoc --list-extensions {fmt}"
-    r = run_cmd(cmd, shell=True, cwd=P.cwd())
-    # partition the extensions into two sets based by default enabling or disabling
-    enabled = set()
-    disabled = set()
-    for e in r.stdout.decode("utf-8").split("\n"):
-        if e.startswith("+"):
-            enabled.add(e[1:])
-        elif e.startswith("-"):
-            disabled.add(e[1:])
+    r = run_cmd(cmd, shell=True, cwd=cwd)
+    extensions_output = r.stdout.decode("utf-8").split("\n")
+
+    # Partition the extensions into sets based on default enabling or disabling
+    enabled = {e[1:] for e in extensions_output if e.startswith("+")}
+    disabled = {e[1:] for e in extensions_output if e.startswith("-")}
+
     return {"enabled": enabled, "disabled": disabled, "all": enabled.union(disabled)}
 
 
 class PFormatExtensionCombo:
-    def __init__(self, fmt=None, enabled=None, disabled=None, by_str=None):
+    def __init__(self, fmt: str = None, enabled=set(), disabled=set(), by_str=None):
         """either fmt or by_str must be specified"""
         if fmt is None and by_str is None:
             raise ValueError("either fmt or by_str must be specified")
