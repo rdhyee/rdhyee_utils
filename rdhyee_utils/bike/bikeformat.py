@@ -3,6 +3,8 @@ from lxml.etree import Element
 from lxml.html import parse, fromstring, tostring, HtmlElement
 from lxml import etree
 
+from pathlib import Path as P
+
 from typing import List, Union
 
 import random
@@ -33,15 +35,18 @@ from panflute import (
     Strong,
 )
 import pypandoc
-import pandoc
 
-import pytest
+# import pandoc
+
+# import pytest
 
 BALLOT_BOX = "\u2610"
 BALLOT_BOX_WITH_X = "\u2612"
 
 namespaces = {"ns": "http://www.w3.org/1999/xhtml"}
 NS = f"{{{namespaces['ns']}}}"
+
+OVERALL_PATH = P.home() / "obsidian" / "MainRY" / "bike" / "overall.bike"
 
 
 def convert_text(
@@ -131,11 +136,20 @@ def generate_id_attribute(length):
     # Start with a random letter (A-Za-z)
     first_char = random.choice(string.ascii_letters)
 
-    # Generate the remaining characters (A-Za-z0-9-_:)
-    valid_chars = string.ascii_letters + string.digits + "-_:"
+    # Generate the remaining characters (A-Za-z0-9-_)
+    valid_chars = string.ascii_letters + string.digits + "-_"
     remaining_chars = "".join(random.choice(valid_chars) for _ in range(length - 1))
 
-    return first_char + i
+    return first_char + remaining_chars
+
+
+def generate_unique_id_attribute(length, existing_ids, max_tries=100):
+    try_count = 0
+    while try_count < max_tries:
+        id_ = generate_id_attribute(length)
+        if id_ not in existing_ids:
+            return id_
+        try_count += 1
 
 
 def cluster_runs(lst, key_func=lambda x: x):
@@ -235,6 +249,15 @@ def rich_text(xhtml, flatten=False, wrap_para=False) -> list["panflute.Element"]
         return [(Str(text_content(xhtml)))]
 
 
+def bike_etree_list_to_panflute(xhtml_list, heading_level=1, meta=None):
+    if meta is None:
+        meta = {}
+    content = []
+    for xhtml in xhtml_list:
+        content.extend(bike_etree_to_panflute(xhtml, heading_level, meta=meta))
+    return content
+
+
 def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
     if xhtml.tag == f"{NS}html":
         body = xhtml.find(f"{NS}body")
@@ -286,7 +309,7 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
         # for now just grab text of p
         # TODO: handle rich text
         p_text = text_content(xhtml.find(f"{NS}p", namespaces=namespaces))
-        p_elem = Span(Str(p_text), attributes=xhtml.attrib)
+        # p_elem = Span(Str(p_text), attributes=xhtml.attrib)
         wrap_para = True if data_type == "body" else False
 
         rich_text_elements = rich_text(
@@ -342,6 +365,15 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
 
     else:
         raise ValueError(f"unknown tag {xhtml.tag}")
+
+
+def get_bike_doc(path=OVERALL_PATH):
+    from rdhyee_utils.bike import Bike
+
+    for d in Bike().documents:
+        f = d.file
+        if f is not None and f.samefile(path):
+            return d
 
 
 # pytest tests

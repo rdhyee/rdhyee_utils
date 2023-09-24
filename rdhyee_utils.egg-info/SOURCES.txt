@@ -12,11 +12,15 @@ rdhyee_utils.egg-info/pbr.json
 rdhyee_utils.egg-info/top_level.txt
 rdhyee_utils/aws/__init__.py
 rdhyee_utils/bike/__init__.py
+rdhyee_utils/bike/bikeformat.py
 rdhyee_utils/clipboard/__init__.py
 rdhyee_utils/clipboard/macos/__init__.py
 rdhyee_utils/google_apis/__init__.py
 rdhyee_utils/google_chrome/__init__.py
 rdhyee_utils/google_chrome/chrome.py
+rdhyee_utils/pandoc/__init__.py
+rdhyee_utils/pandoc/utils.py
 rdhyee_utils/safari/__init__.py
 rdhyee_utils/selenium/__init__.py
+rdhyee_utils/tail_recurse/__init__.py
 tests/test_base.py

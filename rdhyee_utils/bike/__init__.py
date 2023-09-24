@@ -75,9 +75,15 @@ class BikeRichText(object):
 
 
 class BikeDocument(object):
-    def __init__(self, bike, rawdoc):
-        self.bike = bike
-        self.rawdoc = rawdoc
+    def __init__(self, bike=None, rawdoc=None):
+        if bike is None:
+            self.bike = Bike()
+        else:
+            self.bike = bike
+        if rawdoc is None:
+            self.rawdoc = self.bike.app.make(new=k.document)
+        else:
+            self.rawdoc = rawdoc
 
     def __repr__(self):
         return "<BikeDocument: {}>".format(self.name)
@@ -122,11 +128,29 @@ class BikeDocument(object):
     def selection_row(self):
         return BikeRow(self.bike, self.rawdoc.selection_row())
 
+    @property
+    def selection_rows(self):
+        return [BikeRow(self.bike, r) for r in self.rawdoc.selection_rows()]
+
     def close(self, saving=k.yes, saving_in=None):
         self.rawdoc.close(saving=saving, saving_in=saving_in)
 
-    def save(self, in_=None, as_=None):
-        self.rawdoc.save(in_=in_, as_=as_)
+    def save(self, in_: P = None, as_=None):
+        kwargs = {}
+
+        if in_ is not None:
+            kwargs["in_"] = mactypes.File(in_)
+            file_ = in_
+        else:
+            file_ = self.file
+
+        if as_ is not None:
+            kwargs["as_"] = as_
+
+        self.rawdoc.save(**kwargs)
+
+        # search for doc to reassociate with rawdoc
+        self.rawdoc = self.bike.document_by_path(file_).rawdoc
 
     def print_(self, print_dialog=k.yes, with_properties=None):
         self.rawdoc.print_(print_dialog=print_dialog, with_properties=with_properties)
@@ -163,6 +187,14 @@ class BikeDocument(object):
             doc_bike.encode("utf-8"), ET.XMLParser(remove_blank_text=True)
         )
         return etree
+
+    @property
+    def ids(self):
+        """
+        Return a list of ids of the rows
+        """
+        etree = self.lxml_etree()
+        return [e.attrib["id"] for e in etree.xpath("//*[@id]")]
 
 
 class BikeWindow(object):
@@ -223,6 +255,14 @@ class Bike(object):
     @property
     def documents(self):
         return [BikeDocument(self, d) for d in self.app.documents()]
+
+    def document_by_path(self, path):
+        if not path.exists():
+            return None
+        for doc in self.documents:
+            if doc.file is not None and doc.file.samefile(path):
+                return doc
+        return None
 
     def open(self, path: P):
         self.app.open(mactypes.Alias(path))
