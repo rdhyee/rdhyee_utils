@@ -196,6 +196,36 @@ class BikeDocument(object):
         etree = self.lxml_etree()
         return [e.attrib["id"] for e in etree.xpath("//*[@id]")]
 
+    def sort_rows(
+        self,
+        r: BikeRow,
+        row_func=lambda r: r.name,
+        reverse: bool = False,
+    ) -> None:
+        """
+        r: the row whose children to sort
+        row_func: a function that takes a row and returns a value to sort on
+        reverse: whether to sort in reverse order
+        """
+        sort_order = sorted(
+            [(x.id, row_func(x)) for x in r.rows],
+            key=lambda x: x[1],
+            reverse=reverse,
+        )
+
+        for id_, name in sort_order:
+            r_from = self.rawdoc.rows[its.id == id_].get()[0]
+            r.rawrow.move(r_from, to=r.rawrow.rows.end)
+
+    def swap_rows(self, r: BikeRow, i: int, j: int):
+        """swap the child rows i and j of parent row r"""
+        # make sure i not smaller than j
+        if j < i:
+            (i, j) = (j, i)
+
+        r.rawrow.rows[j].move(to=r.rawrow.rows[i].before)
+        r.rawrow.rows[i + 1].move(to=r.rawrow.rows[j + 1].before)
+
 
 class BikeWindow(object):
     def __init__(self, bike, rawwindow):

@@ -279,7 +279,8 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
         )
         clusters = keep_clusters(
             clusters,
-            lambda c: c[0].attrib.get("data-type") in ["ordered", "unordered", "task"],
+            lambda c: c[0].attrib.get("data-type")
+            in ["ordered", "unordered", "quote", "task"],
         )
 
         contents = []
@@ -295,6 +296,16 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
                 for c in cluster:
                     _content.extend(bike_etree_to_panflute(c, heading_level))
                 content = [OrderedList(*wrap_in_list_item(_content))]
+            elif data_type == "quote":
+                _content = []
+                for c in cluster:
+                    _content.extend(bike_etree_to_panflute(c, heading_level))
+                content = [BlockQuote(*_content)]
+            # elif data_type == "code":
+            #     _content = []
+            #     for c in cluster:
+            #         _content.extend(bike_etree_to_panflute(c, heading_level))
+            #     content = [CodeBlock("".join(_content))]
             else:
                 content = bike_etree_to_panflute(cluster[0], heading_level)
 
@@ -339,7 +350,8 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
             # contents.append( Para(Note(Plain(Str(p_text)))))
             contents.append(Para(Note(Plain(*rich_text_elements))))
         elif data_type == "quote":
-            contents.append((BlockQuote(Para(*rich_text_elements))))
+            # contents.append((BlockQuote(Para(*rich_text_elements))))
+            contents.append(((Para(*rich_text_elements))))
         elif data_type == "task":
             task_done = xhtml.attrib.get("data-done", False)
             task_marker = BALLOT_BOX if not task_done else BALLOT_BOX_WITH_X
@@ -348,6 +360,7 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
             )
         elif data_type == "code":
             contents.append(CodeBlock(p_text))
+            # contents.append(p_text)
         elif data_type in ("ordered", "unordered"):
             # contents.append(ListItem(Plain(p_elem)))
             contents.append(ListItem(Plain(*rich_text_elements)))
@@ -374,6 +387,36 @@ def get_bike_doc(path=OVERALL_PATH):
         f = d.file
         if f is not None and f.samefile(path):
             return d
+
+
+def ids(etree:ET.Element) -> List[str]:
+    """
+    Return a list of ids of the rows
+    """
+    return [e.attrib["id"] for e in etree.xpath("//*[@id]")]
+
+
+def panflute_to_bike_etree(pfdoc) -> Element:
+    """
+    At this point: generate an empty etree
+    """
+
+    etree = ET.Element("html", nsmap=namespaces)
+
+    # add a head
+    head = ET.SubElement(etree, "head")
+    meta = ET.SubElement(head, "meta", attrib={"charset": "utf-8"})
+
+    # add a body
+    body = ET.SubElement(etree, "body")
+
+    # add a root ul to body
+    root_ul = ET.SubElement(
+        body, "ul", attrib={"id": generate_unique_id_attribute(8, ids(etree))}
+    )
+
+    return etree
+    # print(ET.tostring(etree, pretty_print=True, encoding="utf-8", xml_declaration=True).decode('utf-8'))
 
 
 # pytest tests
