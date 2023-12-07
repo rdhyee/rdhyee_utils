@@ -107,7 +107,7 @@ def test_drive_service():
         ],
     )
 
-    drive = DriveService(credentials)
+    drive = DriveService(credentials, version="v3")
     sheets = SheetsService(credentials)
 
     # create a folder

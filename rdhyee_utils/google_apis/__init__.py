@@ -1,27 +1,14 @@
-from __future__ import print_function
-
 from pathlib import Path
 
-import httplib2
-import os
 from itertools import zip_longest
 from collections import OrderedDict
 
-import apiclient
 from apiclient import errors
 
-from oauth2client import client
-from oauth2client import tools
-from oauth2client.file import Storage
-
-# will need to replace apiclient with googleapiclient
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-
-
-import argparse
-
-flags = argparse.Namespace()
-
 
 # If modifying these scopes, delete your previously saved credentials
 # at ~/.credentials/sheets.googleapis.com-python-quickstart.json
@@ -40,57 +27,67 @@ SANDBOX_ID = "1McPdxcvGyGKrkuje5N80uIHG-IEW6j9qx-9Dr3GIsL0"
 
 def get_credentials(
     credentials_file_name,
-    application_name,
-    scopes,
+    application_name=None,
+    scopes=None,
     client_secret_file=CLIENT_SECRET_FILE,
     flags=None,
     credential_dir=None,
 ):
-    """Gets valid user credentials from storage.
+    """
+    Retrieves or generates credentials for accessing Google APIs.
 
-    If nothing has been stored, or if the stored credentials are invalid,
-    the OAuth2 flow is completed to obtain the new credentials.
+    Args:
+        credentials_file_name (str): The name of the credentials file.
+        application_name (str, optional): The name of the application. Defaults to None. (Deprecated)
+        scopes (list, optional): The list of scopes for the credentials. Defaults to None.
+        client_secret_file (str, optional): The path to the client secret file. Defaults to CLIENT_SECRET_FILE.
+        flags (object, optional): The flags object. Defaults to None. (Deprecated)
+        credential_dir (str, optional): The directory to store the credentials. Defaults to None.
 
     Returns:
-        Credentials, the obtained credential.
+        google.auth.credentials.Credentials: The credentials for accessing Google APIs.
     """
-
     if credential_dir is None:
-        home_dir = os.path.expanduser("~")
-        credential_dir = os.path.join(home_dir, ".credentials")
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir, credentials_file_name)
+        home_dir = Path.home()
+        credential_dir = home_dir.joinpath(".credentials")
+    if not credential_dir.exists():
+        credential_dir.mkdir(parents=True)
+    credential_path = credential_dir.joinpath(credentials_file_name)
 
-    store = Storage(credential_path)
-    credentials = store.get()
+    if credential_path.exists():
+        credentials = Credentials.from_authorized_user_file(credential_path, scopes)
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        parents=[tools.argparser],
-    )
-    flags = parser.parse_args([])
-
-    if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(client_secret_file, scopes)
-        flow.user_agent = application_name
-        credentials = tools.run_flow(flow, store, flags)
-        print("Storing credentials to " + credential_path)
+    # If there are no (valid) credentials available, let the user log in.
+    if not credentials or not credentials.valid:
+        if credentials and credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                client_secret_file, scopes
+            )
+            credentials = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open(credential_path, "w") as token:
+            token.write(credentials.to_json())
 
     return credentials
 
 
 def get_service(name, version, credentials):
-    http = credentials.authorize(httplib2.Http())
-    service = apiclient.discovery.build(name, version, http=http)
-    return service
+    """
+    Creates and returns a Google API service object.
 
+    Args:
+        name (str): The name of the API service.
+        version (str): The version of the API service.
+        credentials: The credentials object used for authentication.
 
-def get_service_2(name, version, credentials, static_discovery=False):
-    service = build(
-        name, version, credentials=credentials, static_discovery=static_discovery
-    )
+    Returns:
+        object: The Google API service object.
+
+    """
+    # Function implementation goes here
+    service = build(name, version, credentials=credentials)
     return service
 
 
@@ -374,132 +371,3 @@ def apply_locale(n):
     return locale.atoi(n)
     # 1000000
     locale.atof("1,000,000.53")
-
-
-# def test_hello():
-#     assert True
-
-
-# def test_basic_sheet_scenario():
-#     """Shows basic usage of the Sheets API.
-
-#     Creates a Sheets API service object and prints the names and majors of
-#     students in a sample spreadsheet:
-#     https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
-#     """
-#     credentials = get_credentials(
-#         "sheets.googleapis.com-python-quickstart.json",
-#         "quick start",
-#         "https://www.googleapis.com/auth/spreadsheets",
-#         client_secret_file=CLIENT_SECRET_FILE,
-#     )
-#     service = get_service("sheets", "v4", credentials)
-
-#     spreadsheetId = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-#     rangeName = "Class Data!A2:E"
-#     result = (
-#         service.spreadsheets()
-#         .values()
-#         .get(spreadsheetId=spreadsheetId, range=rangeName)
-#         .execute()
-#     )
-#     values = result.get("values", [])
-
-#     assert len(values) == 30
-
-
-# def test_expected_keys_in_spreadsheet_metadata():
-#     credentials = get_credentials(
-#         "sheets.googleapis.com-python-quickstart.json",
-#         "sandbox exploration",
-#         "https://www.googleapis.com/auth/spreadsheets",
-#     )
-#     service = get_service("sheets", "v4", credentials)
-
-#     spreadsheetId = SANDBOX_ID
-
-#     # how to read sheet names from a given spreadsheet
-#     result = service.spreadsheets().get(spreadsheetId=spreadsheetId).execute()
-
-#     assert set(result.keys()).issubset(
-#         set(["spreadsheetId", "properties", "sheets", "namedRanges", "spreadsheetUrl"])
-#     )
-
-
-# def test_drive_service():
-#     credentials = get_credentials(
-#         "sheets.googleapis.com-python-quickstart.json",
-#         "sandbox exploration",
-#         [
-#             "https://www.googleapis.com/auth/spreadsheets",
-#             "https://www.googleapis.com/auth/drive",
-#         ],
-#     )
-
-#     drive = DriveService(credentials)
-#     sheets = SheetsService(credentials)
-
-#     # create a folder
-#     folder = drive.create_folder("Test 2017.08.23")
-
-#     # create spreadsheet and move to folder
-#     ss1 = sheets.create_spreadsheet(
-#         sheets.spreadsheet_properties("2017.08.23 Sheet", "Sheet 1")
-#     )
-#     drive.move_file_to_folder(ss1["spreadsheetId"], folder["id"])
-
-#     # add sheet
-#     sheet2 = sheets.add_sheet(ss1["spreadsheetId"], "Sheet 2")
-#     # delete sheet
-#     sheets.delete_sheet(
-#         ss1["spreadsheetId"], sheet2["replies"][0]["addSheet"]["properties"]["sheetId"]
-#     )
-
-#     # delete folder
-#     drive.delete_file(folder["id"])
-
-
-# def test_write_query():
-#     # https://docs.google.com/spreadsheets/d/1McPdxcvGyGKrkuje5N80uIHG-IEW6j9qx-9Dr3GIsL0/edit#gid=0
-#     spreadsheet_id = SANDBOX_ID
-#     rangeName = "My Sheet 1!A16"
-
-#     credentials = get_credentials(
-#         "sheets.googleapis.com-python-quickstart.json",
-#         "sandbox exploration",
-#         "https://www.googleapis.com/auth/spreadsheets",
-#     )
-#     service = get_service("sheets", "v4", credentials)
-
-#     values = [
-#         ['=QUERY(countries, "SELECT sum(B)", -1)'],
-#         # Additional rows ...
-#     ]
-#     body = {"values": values}
-
-#     value_input_option = "USER_ENTERED"
-
-#     result = (
-#         service.spreadsheets()
-#         .values()
-#         .update(
-#             spreadsheetId=spreadsheet_id,
-#             range=rangeName,
-#             valueInputOption=value_input_option,
-#             body=body,
-#         )
-#         .execute()
-#     )
-
-#     assert result["updatedRows"] == 1
-
-#     # read back total
-
-#     result = (
-#         service.spreadsheets()
-#         .values()
-#         .get(spreadsheetId=spreadsheet_id, range="My Sheet 1!A16:A17")
-#         .execute()
-#     )
-
-#     assert result["values"][1][0] == "3334647600"
