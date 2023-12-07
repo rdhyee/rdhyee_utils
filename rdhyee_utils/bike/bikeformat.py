@@ -10,8 +10,10 @@ from typing import List, Union
 import random
 import string
 
+from rdhyee_utils.bike import Bike
+
 # import json
-# import panflute as pf
+import panflute as pf
 from panflute import (
     Doc,
     Header,
@@ -47,6 +49,7 @@ namespaces = {"ns": "http://www.w3.org/1999/xhtml"}
 NS = f"{{{namespaces['ns']}}}"
 
 OVERALL_PATH = P.home() / "obsidian" / "MainRY" / "bike" / "overall.bike"
+ONLY_DOC_CHILDREN = True
 
 
 def convert_text(
@@ -381,7 +384,6 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
 
 
 def get_bike_doc(path=OVERALL_PATH):
-    from rdhyee_utils.bike import Bike
 
     for d in Bike().documents:
         f = d.file
@@ -417,6 +419,33 @@ def panflute_to_bike_etree(pfdoc) -> Element:
 
     return etree
     # print(ET.tostring(etree, pretty_print=True, encoding="utf-8", xml_declaration=True).decode('utf-8'))
+
+
+# https://www.perplexity.ai/search/Write-me-a-MFQekCRfQSyjfylvmBlUng?s=c
+def merge_consecutive_codeblocks(elem, doc):
+    """Merge consecutive code blocks"""
+    if (
+        isinstance(elem, pf.CodeBlock)
+        and doc.prev_elem
+        and isinstance(doc.prev_elem, pf.CodeBlock)
+    ):
+        doc.prev_elem.text += "\n" + elem.text
+        return []
+    doc.prev_elem = elem
+
+
+def etree_to_panflute(etree, only_doc_children=ONLY_DOC_CHILDREN):
+    if only_doc_children:
+        etree2 = etree.findall("ns:body/ns:ul/*", namespaces=namespaces)
+        pfd = bike_etree_list_to_panflute(etree2)
+        # TO DO: fancier wrapping of items -- for example, there might be ListItems that are not wrapped in a List type of some sort
+        pfd = pf.Doc(*pfd)
+    else:
+        pfd = bike_etree_to_panflute(etree)
+
+    pf.run_filter(merge_consecutive_codeblocks, doc=pfd)
+    return pfd
+
 
 
 # pytest tests
