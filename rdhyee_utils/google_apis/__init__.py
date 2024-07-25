@@ -55,7 +55,12 @@ def get_credentials(
     credential_path = credential_dir.joinpath(credentials_file_name)
 
     if credential_path.exists():
-        credentials = Credentials.from_authorized_user_file(credential_path, scopes)
+        credentials = Credentials.from_authorized_user_file(
+            credential_path, 
+            scopes
+        )
+    else:
+        credentials = None
 
     # If there are no (valid) credentials available, let the user log in.
     if not credentials or not credentials.valid:
