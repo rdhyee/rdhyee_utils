@@ -11,6 +11,11 @@ __all__ = [
     "selenium",
 ]
 
+import subprocess
+import shlex
+
+from typing import Union, Tuple
+
 
 # http://stackoverflow.com/questions/2348317/how-to-write-a-pager-for-python-iterators/2350904#2350904
 def grouper(iterable, page_size):
@@ -44,3 +49,23 @@ def nowish_tz(tzname="US/Pacific"):
         .replace(tzinfo=pytz.utc)
         .astimezone(tz)
     )
+
+
+def execute_command(
+    command: Union[str, list], use_shell: bool = False, check: bool = False
+) -> Tuple[str, str]:
+    """
+    Execute a shell command and return its output and error messages."""
+    if isinstance(command, str) and not use_shell:
+        command = shlex.split(command)
+
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        shell=use_shell,
+        check=check,
+    )
+
+    return result.stdout, result.stderr
