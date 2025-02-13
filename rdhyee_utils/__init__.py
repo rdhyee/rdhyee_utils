@@ -1,24 +1,24 @@
+"""
+general utility functions
+"""
 __all__ = [
     "grouper",
     "singleton",
-    "nowish_tz",
-    "aws",
-    "bike",
-    "google_apis",
-    "google_chrome",
-    "mail",
-    "safari",
-    "selenium",
+    "nowish_tz"
 ]
+
+from typing import Union, Tuple
 
 import subprocess
 import shlex
+import datetime
+import pytz
 
-from typing import Union, Tuple
 
 
 # http://stackoverflow.com/questions/2348317/how-to-write-a-pager-for-python-iterators/2350904#2350904
 def grouper(iterable, page_size):
+    """grouper('ABCDEFG', 3) --> ABC DEF G"""
     page = []
     for item in iterable:
         page.append(item)
@@ -31,6 +31,7 @@ def grouper(iterable, page_size):
 
 # http://stackoverflow.com/questions/42558/python-and-the-singleton-pattern/2752280#2752280
 def singleton(cls):
+    """Decorator that makes a class a singleton."""
     instances = {}
 
     def getinstance():
@@ -42,6 +43,8 @@ def singleton(cls):
 
 
 def nowish_tz(tzname="US/Pacific"):
+    """
+    Return the current time in a given timezone. Default is US/Pacific."""
     # put in Pacific time
     tz = pytz.timezone(tzname)
     return (
