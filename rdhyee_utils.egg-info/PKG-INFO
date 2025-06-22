@@ -1,13 +1,22 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: rdhyee_utils
-Version: 0.1.13
+Version: 0.1.15
 Summary: Some simple methods and classes Raymond Yee developed for his own work.
 Home-page: https://github.com/rdhyee/rdhyee_utils
-Download-URL: https://github.com/rdhyee/rdhyee_utils/tarball/0.1.13
+Download-URL: https://github.com/rdhyee/rdhyee_utils/tarball/0.1.15
 Author: Raymond Yee
 Author-email: raymond.yee@gmail.com
 License: Apache 2.0
 Keywords: utilities
 License-File: LICENSE.txt
+Dynamic: author
+Dynamic: author-email
+Dynamic: description
+Dynamic: download-url
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: license-file
+Dynamic: summary
 
 Some simple methods and classes Raymond Yee developed for his own work.

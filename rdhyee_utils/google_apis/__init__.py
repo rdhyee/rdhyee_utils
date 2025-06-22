@@ -10,6 +10,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+# Import Gmail service for easy access
+from .gmail import GmailService
+
 # If modifying these scopes, delete your previously saved credentials
 # at ~/.credentials/sheets.googleapis.com-python-quickstart.json
 SCOPES = "https://www.googleapis.com/auth/spreadsheets"
@@ -376,3 +379,7 @@ def apply_locale(n):
     return locale.atoi(n)
     # 1000000
     locale.atof("1,000,000.53")
+
+
+# Export public API
+__all__ = ['get_credentials', 'get_service', 'DriveService', 'GmailService', 'CLIENT_SECRET_FILE']

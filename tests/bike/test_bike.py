@@ -1,19 +1,24 @@
-import pytest
-import applescript
-from appscript import app, k, its
-
-# add two directories up to sys.path
+"""
+test_bike.py
+"""
 import sys
-import pathlib
 from pathlib import Path as P
 
+# add two directories up to sys.path
 # add rdhyee_utils to sys.path explicitly
 # don't assume that rdhyee_utils is in the PYTHONPATH
 
 p = P(__file__).parents[2]
 sys.path.append(str(p))  # noqa: E402
 
-from rdhyee_utils.bike import Bike  # noqa: E402
+try:
+    from rdhyee_utils.bike import Bike  # noqa: E402
+except ImportError:
+    pass
+
+import pytest
+import applescript
+from appscript import app, k, its
 
 
 def test_divide_by_zero() -> None:

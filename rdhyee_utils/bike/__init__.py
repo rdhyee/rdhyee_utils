@@ -2,15 +2,16 @@
 for bike
 """
 
+from pathlib import Path as P
+from typing import Union
+
 import applescript
 from appscript import app, k, its, mactypes
-from pathlib import Path as P
 
 import lxml
 import lxml.etree as ET
 from lxml.html import parse, fromstring, tostring, HtmlElement
 
-from typing import Union
 
 
 ascript = """
@@ -162,9 +163,7 @@ class BikeDocument(object):
         assert as_ in (k.plain_text_format, k.OPML_format, k.bike_format)
         if from_ is not None:
             assert isinstance(from_, list)
-            return self.rawdoc.export(
-                as_=as_, from_=[_to_raw(obj) for obj in from_], all=all
-            )
+            return self.rawdoc.export(as_=as_, from_=[_to_raw(obj) for obj in from_], all=all)
         else:
             return self.rawdoc.export(as_=as_, all=all)
 
@@ -183,9 +182,7 @@ class BikeDocument(object):
         all: Export all contained rows (true) or only the given rows (false). Defaults to true
         """
         doc_bike = self.export(as_=k.bike_format, from_=from_, all=all)
-        etree = ET.fromstring(
-            doc_bike.encode("utf-8"), ET.XMLParser(remove_blank_text=True)
-        )
+        etree = ET.fromstring(doc_bike.encode("utf-8"), ET.XMLParser(remove_blank_text=True))
         return etree
 
     @property
