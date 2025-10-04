@@ -3,3 +3,19 @@ dist/*
 __pycache__/*
 *.bak
 *.pyc
+
+# Data and output files
+*.csv
+*.ipynb
+examples/*.txt
+examples/output.*
+
+# Credentials and secrets
+*.json
+!client_secret.json.example
+.credentials/
+
+# OS files
+.DS_Store
+*.swp
+*~
