@@ -48,6 +48,28 @@ BALLOT_BOX_WITH_X = "\u2612"
 namespaces = {"ns": "http://www.w3.org/1999/xhtml"}
 NS = f"{{{namespaces['ns']}}}"
 
+
+def tag_matches(element_tag: str, tag_name: str) -> bool:
+    """Check if element tag matches, handling both namespaced and plain tags."""
+    return element_tag == tag_name or element_tag == f"{NS}{tag_name}"
+
+
+def find_child(element, tag_name: str):
+    """Find child element, handling both namespaced and plain tags."""
+    # Try with namespace first, then without
+    child = element.find(f"{NS}{tag_name}")
+    if child is None:
+        child = element.find(tag_name)
+    return child
+
+
+def find_children(element, tag_name: str):
+    """Find all child elements, handling both namespaced and plain tags."""
+    children = element.findall(f"{NS}{tag_name}")
+    if not children:
+        children = element.findall(tag_name)
+    return children
+
 OVERALL_PATH = P.home() / "obsidian" / "MainRY" / "bike" / "overall.bike"
 ONLY_DOC_CHILDREN = True
 
@@ -228,25 +250,25 @@ def rich_text(xhtml, flatten=False, wrap_para=False) -> list["panflute.Element"]
         if xhtml.tail is not None:
             parts.append(Str(xhtml.tail))
 
-    if xhtml.tag == f"{NS}p":
+    if tag_matches(xhtml.tag, "p"):
         if wrap_para:
             return [Para(*parts)]
         else:
             return parts
-    elif xhtml.tag == f"{NS}a":
+    elif tag_matches(xhtml.tag, "a"):
         return [Link(*parts, url=xhtml.attrib["href"])]
-    elif xhtml.tag == f"{NS}span":
+    elif tag_matches(xhtml.tag, "span"):
         return [Span(*parts, attributes=xhtml.attrib)]
-    elif xhtml.tag == f"{NS}code":
+    elif tag_matches(xhtml.tag, "code"):
         # TO DO: think this part through more carefully -- am I flattening too much here?
         return [Code(text_content(xhtml))]
-    elif xhtml.tag == f"{NS}strong":
+    elif tag_matches(xhtml.tag, "strong"):
         return [Strong(*parts)]
-    elif xhtml.tag == f"{NS}em":
+    elif tag_matches(xhtml.tag, "em"):
         return [Emph(*parts)]
-    elif xhtml.tag == f"{NS}mark":
+    elif tag_matches(xhtml.tag, "mark"):
         return [Span(*parts, attributes={"class": "mark"})]
-    elif xhtml.tag == f"{NS}s":
+    elif tag_matches(xhtml.tag, "s"):
         return [Strikeout(*parts)]
     else:
         return [(Str(text_content(xhtml)))]
@@ -262,20 +284,21 @@ def bike_etree_list_to_panflute(xhtml_list, heading_level=1, meta=None):
 
 
 def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
-    if xhtml.tag == f"{NS}html":
-        body = xhtml.find(f"{NS}body")
+    if tag_matches(xhtml.tag, "html"):
+        body = find_child(xhtml, "body")
         if meta is None:
             meta = {}
         content = bike_etree_to_panflute(body, heading_level, meta=meta)
         return Doc(*content, metadata=meta, format="html")
-    elif xhtml.tag == f"{NS}body":
-        id_ = xhtml.find(f"{NS}ul").attrib["id"]
+    elif tag_matches(xhtml.tag, "body"):
+        ul_elem = find_child(xhtml, "ul")
+        id_ = ul_elem.attrib["id"]
         return [
-            Div(*bike_etree_to_panflute(xhtml.find(f"{NS}ul")), attributes={"id": id_})
+            Div(*bike_etree_to_panflute(ul_elem), attributes={"id": id_})
         ]
         # return bike_etree_to_panflute(xhtml.find(f'{NS}ul'))
-    elif xhtml.tag == f"{NS}ul":
-        li_elements = xhtml.findall(f"{NS}li")
+    elif tag_matches(xhtml.tag, "ul"):
+        li_elements = find_children(xhtml, "li")
 
         clusters = cluster_runs(
             li_elements, lambda e: e.attrib.get("data-type", "body")
@@ -315,19 +338,20 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
             contents.extend(content)
 
         return contents
-    elif xhtml.tag == f"{NS}li":
+    elif tag_matches(xhtml.tag, "li"):
         contents = []
         data_type = xhtml.attrib.get("data-type", "body")
         id_ = xhtml.attrib.get("id")
 
         # for now just grab text of p
         # TODO: handle rich text
-        p_text = text_content(xhtml.find(f"{NS}p", namespaces=namespaces))
+        p_elem = find_child(xhtml, "p")
+        p_text = text_content(p_elem)
         # p_elem = Span(Str(p_text), attributes=xhtml.attrib)
         wrap_para = True if data_type == "body" else False
 
         rich_text_elements = rich_text(
-            xhtml.find(f"{NS}p", namespaces=namespaces),
+            p_elem,
             flatten=False,
             wrap_para=wrap_para,
         )
@@ -371,11 +395,12 @@ def bike_etree_to_panflute(xhtml, heading_level=1, meta=None):
             raise ValueError(f"unknown data-type {data_type}")
 
         # now handle ul
-        if True and xhtml.find(f"{NS}ul") is not None:
+        ul_child = find_child(xhtml, "ul")
+        if ul_child is not None:
             contents.extend(
-                bike_etree_to_panflute(xhtml.find(f"{NS}ul"), heading_level)
+                bike_etree_to_panflute(ul_child, heading_level)
             )
-            # contents.append(ListItem(*bike_etree_to_panflute(xhtml.find(f'{NS}ul'), heading_level)))
+            # contents.append(ListItem(*bike_etree_to_panflute(ul_child, heading_level)))
 
         return contents
 
@@ -396,6 +421,113 @@ def ids(etree:ET.Element) -> List[str]:
     Return a list of ids of the rows
     """
     return [e.attrib["id"] for e in etree.xpath("//*[@id]")]
+
+
+def panflute_inline_to_bike_xml(elem, parent_elem):
+    """
+    Convert panflute inline elements to Bike XML elements.
+
+    Maps panflute inline elements to their Bike XML equivalents:
+    - Str → text content
+    - Strong → <strong>
+    - Emph → <em>
+    - Code → <code>
+    - Link → <a href="...">
+    - Strikeout → <s>
+    - Space/SoftBreak → " "
+    - Span with class="mark" → <mark>
+
+    Args:
+        elem: Panflute inline element
+        parent_elem: lxml Element to append to
+    """
+    if isinstance(elem, pf.Str):
+        # Add text to parent
+        if len(parent_elem) == 0:
+            parent_elem.text = (parent_elem.text or "") + elem.text
+        else:
+            parent_elem[-1].tail = (parent_elem[-1].tail or "") + elem.text
+
+    elif isinstance(elem, pf.Space):
+        # Add space
+        if len(parent_elem) == 0:
+            parent_elem.text = (parent_elem.text or "") + " "
+        else:
+            parent_elem[-1].tail = (parent_elem[-1].tail or "") + " "
+
+    elif isinstance(elem, (pf.SoftBreak, pf.LineBreak)):
+        # Add space for softbreak
+        if isinstance(elem, pf.SoftBreak):
+            if len(parent_elem) == 0:
+                parent_elem.text = (parent_elem.text or "") + " "
+            else:
+                parent_elem[-1].tail = (parent_elem[-1].tail or "") + " "
+
+    elif isinstance(elem, pf.Strong):
+        strong = ET.SubElement(parent_elem, f"{NS}strong")
+        for child in elem.content:
+            panflute_inline_to_bike_xml(child, strong)
+
+    elif isinstance(elem, pf.Emph):
+        em = ET.SubElement(parent_elem, f"{NS}em")
+        for child in elem.content:
+            panflute_inline_to_bike_xml(child, em)
+
+    elif isinstance(elem, pf.Code):
+        code = ET.SubElement(parent_elem, f"{NS}code")
+        code.text = elem.text
+
+    elif isinstance(elem, pf.Link):
+        a = ET.SubElement(parent_elem, f"{NS}a", attrib={"href": elem.url})
+        for child in elem.content:
+            panflute_inline_to_bike_xml(child, a)
+
+    elif isinstance(elem, pf.Strikeout):
+        s = ET.SubElement(parent_elem, f"{NS}s")
+        for child in elem.content:
+            panflute_inline_to_bike_xml(child, s)
+
+    elif isinstance(elem, pf.Span):
+        # Check if it's a <mark> (highlighted text)
+        if elem.attributes.get("class") == "mark":
+            mark = ET.SubElement(parent_elem, f"{NS}mark")
+            for child in elem.content:
+                panflute_inline_to_bike_xml(child, mark)
+        else:
+            # Regular span
+            span = ET.SubElement(parent_elem, f"{NS}span", attrib=dict(elem.attributes))
+            for child in elem.content:
+                panflute_inline_to_bike_xml(child, span)
+
+
+def markdown_to_bike_p_element(markdown_text: str) -> Element:
+    """
+    Convert markdown text to a Bike <p> element with formatting.
+
+    Args:
+        markdown_text: Markdown-formatted text (e.g., "This is **bold**")
+
+    Returns:
+        lxml Element representing a <p> tag with formatted content
+
+    Example:
+        >>> p_elem = markdown_to_bike_p_element("Text with **bold** and *italic*")
+        >>> ET.tostring(p_elem, encoding='unicode')
+        '<p>Text with <strong>bold</strong> and <em>italic</em></p>'
+    """
+    # Convert markdown to panflute
+    doc = pf.convert_text(markdown_text, input_format='markdown', output_format='panflute')
+
+    # Create <p> element
+    p = ET.Element(f"{NS}p")
+
+    # Extract paragraph content and convert to Bike XML
+    if doc and isinstance(doc[0], pf.Para):
+        para = doc[0]
+        for elem in para.content:
+            panflute_inline_to_bike_xml(elem, p)
+
+    return p
 
 
 def panflute_to_bike_etree(pfdoc) -> Element:
