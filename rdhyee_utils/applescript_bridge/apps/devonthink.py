@@ -824,19 +824,34 @@ class DEVONthink:
     # --- Summarize ---
 
     def summarize_text(self, text: str, style: Optional[str] = None) -> str:
-        """Summarize text using DT4's AI."""
+        """Summarize text using DT4's AI.
+
+        Args:
+            text: The text to summarize.
+            style: 'list', 'key_points', 'table', 'text', or 'custom'.
+        """
         kwargs = {}
         if style:
-            kwargs["as_"] = style
+            kwargs["as_"] = _resolve_enum(style, SUMMARY_STYLES, "summary style")
         return self._app.summarize_text(text, **kwargs)
 
     def summarize_records(self, records: List[DTRecord],
                           format: str = "markdown",
-                          in_group: Optional[DTRecord] = None) -> Any:
-        """Summarize contents of records."""
+                          in_group: Optional[DTRecord] = None,
+                          style: Optional[str] = None) -> Any:
+        """Summarize contents of records.
+
+        Args:
+            records: Records to summarize.
+            format: Output format ('markdown', 'simple', 'rich', 'sheet').
+            in_group: Destination group for the summary.
+            style: 'list', 'key_points', 'table', 'text', or 'custom'.
+        """
         kwargs = {"records": [r._raw for r in records], "to": format}
         if in_group:
             kwargs["in_"] = in_group._raw
+        if style:
+            kwargs["as_"] = _resolve_enum(style, SUMMARY_STYLES, "summary style")
         return self._app.summarize_contents_of(**kwargs)
 
     # --- Transcribe ---
