@@ -105,14 +105,16 @@ class Style:
     def render(self, rows: Sequence[Row], title: Optional[str] = None) -> str:
         """
         Render a sequence of sibling rows (a subtree's children, or the row
-        itself) to markdown.  ``title`` renders as an H1 above the body.
+        itself) to markdown.  ``title`` renders as an H1 above the body; in
+        that case heading rows in the body start at ``##`` so they can't
+        collide with the document title.
         """
-        body = self.render_rows(rows)
         if title:
+            body = self.render_rows(rows, start_level=2)
             return f"# {title}\n\n{body}".rstrip() + "\n"
-        return body.rstrip() + "\n"
+        return self.render_rows(rows).rstrip() + "\n"
 
-    def render_rows(self, rows: Sequence[Row]) -> str:  # pragma: no cover
+    def render_rows(self, rows: Sequence[Row], start_level: int = 1) -> str:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -146,7 +148,8 @@ class OutlineStyle(Style):
     name = "outline"
     description = "list-preserving: every row a bullet, exact Bike nesting"
 
-    def render_rows(self, rows: Sequence[Row]) -> str:
+    def render_rows(self, rows: Sequence[Row], start_level: int = 1) -> str:
+        # outline style has no heading levels; start_level is irrelevant
         lines: List[str] = []
         self._emit(rows, "", lines)
         return "\n".join(lines) + ("\n" if lines else "")
@@ -218,9 +221,9 @@ class SectionsStyle(Style):
 
     max_heading_level = 6
 
-    def render_rows(self, rows: Sequence[Row]) -> str:
+    def render_rows(self, rows: Sequence[Row], start_level: int = 1) -> str:
         blocks: List[str] = []
-        self._emit_sections(rows, level=1, blocks=blocks)
+        self._emit_sections(rows, level=start_level, blocks=blocks)
         return "\n\n".join(b for b in blocks if b) + ("\n" if blocks else "")
 
     def _emit_sections(self, rows: Sequence[Row], level: int, blocks: List[str]) -> None:
@@ -305,9 +308,9 @@ class ProseStyle(Style):
 
     max_heading_level = 6
 
-    def render_rows(self, rows: Sequence[Row]) -> str:
+    def render_rows(self, rows: Sequence[Row], start_level: int = 1) -> str:
         blocks: List[str] = []
-        self._emit_blocks(rows, heading_level=1, blocks=blocks)
+        self._emit_blocks(rows, heading_level=start_level, blocks=blocks)
         return "\n\n".join(b for b in blocks if b) + ("\n" if blocks else "")
 
     # ---- block context ----------------------------------------------------
@@ -403,9 +406,12 @@ def get_style(name: str) -> Style:
 def render_row(row: Row, style: str = "sections", title_from_row: bool = True) -> str:
     """
     Convenience: render one row's subtree.  When ``title_from_row`` is true,
-    the row's own text becomes the document H1 and its children the body.
+    the row's own PLAIN text becomes the document H1 (inline markup would
+    look wrong in a title) and its children the body, with body headings
+    starting at ``##``.
     """
     s = get_style(style)
     if title_from_row:
-        return s.render(row.children, title=row_markdown(row))
+        title = " ".join(row.text.split()) or "(untitled)"
+        return s.render(row.children, title=title)
     return s.render([row])

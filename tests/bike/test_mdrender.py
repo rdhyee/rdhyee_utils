@@ -142,6 +142,18 @@ def test_render_row_title_from_row(doc):
     assert "> First quoted line" in md
 
 
+def test_render_row_title_rebases_child_headings(doc):
+    """With a title H1, body headings start at ## (no level collision)."""
+    h1 = doc.find_by_id("h1")
+    md = render_row(h1, style="sections")
+    assert md.startswith("# Project Alpha\n")
+    assert "\n## Details\n" in md
+    assert "\n# Details\n" not in md
+    # prose style honors the same re-basing
+    md_prose = render_row(h1, style="prose")
+    assert "\n## Details\n" in md_prose
+
+
 def test_render_row_without_title(doc):
     h2 = doc.find_by_id("h2")
     md = render_row(h2, style="outline", title_from_row=False)
