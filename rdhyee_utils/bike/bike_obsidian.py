@@ -15,6 +15,7 @@ import panflute as pf
 import pypandoc
 
 from rdhyee_utils.bike import Bike, BikeDocument, BikeRow
+from rdhyee_utils.bike import mdimport
 from rdhyee_utils.bike.bikeformat import (
     namespaces,
     bike_etree_to_panflute,
@@ -319,41 +320,78 @@ class BikeObsidianBridge:
     def import_markdown_to_bike(
         self,
         markdown: str,
-        parent_row: Optional[Union[BikeRow, str]] = None
-    ) -> List[BikeRow]:
+        parent_row: Optional[Union[BikeRow, str]] = None,
+        position: str = "append",
+        output_path: Optional[Union[str, Path]] = None,
+    ) -> List[str]:
         """
-        Import markdown into Bike as new rows.
+        Import markdown into Bike as new rows, on the file-level tree model
+        (this closes the "???" step named in the 2025-11-21 dev-journal
+        gap: ``Markdown -> panflute -> Bike XML -> ??? -> Bike.app``).
+
+        This delegates to the tested, model-based grafting in
+        ``rdhyee_utils.bike.mdimport`` (``markdown -> pandoc(-t
+        bike_writer.lua) -> BikeDoc rows -> insert_rows()`` with
+        collision-free id re-keying) rather than driving Bike.app live via
+        AppleScript. That's a deliberate, honest scope decision: the
+        AppleScript object model here (``Bike``/``BikeDocument``/``BikeRow``
+        in ``rdhyee_utils/bike/__init__.py``) has no verb to create new rows
+        or to force a reload from disk, so a live-AppleScript-insertion
+        implementation is a different, larger feature and is NOT what this
+        method does. (A separate, uncommitted 2025-11 working-tree draft
+        takes the panflute route to a similar end; this is the committed,
+        tested equivalent — see ``rdhyee_utils/bike/mdimport.py`` and
+        ``BIKE_PANDOC_DESIGN.md`` for the full relationship.)
+
+        Because there is no AppleScript "revert"/reload verb, overwriting
+        ``self.bike_file`` on disk while Bike.app has it open with unsaved
+        edits would risk losing those edits when the human later saves from
+        the GUI. This method refuses to write in that situation unless an
+        explicit ``output_path`` is given (writing elsewhere is always
+        safe). When the target file *is* open in Bike.app (with no unsaved
+        changes, or via ``output_path``), Bike.app will show "File Changed
+        on Disk" and the human uses File > Revert to Saved to pick up the
+        change — this method does not attempt to automate that.
 
         Args:
             markdown: Markdown text to import
-            parent_row: Parent row to add under (None = root)
+            parent_row: Parent row to graft under (None = document root);
+                a ``BikeRow`` (its ``.id`` is used) or a raw row id string
+            position: "append" (default) or "prepend" among the parent's
+                existing children
+            output_path: explicit write target; defaults to ``self.bike_file``
+                (in place). Required (and always honored) if the file is
+                open in Bike.app with unsaved changes.
 
         Returns:
-            List of created BikeRow objects
+            ids of the newly inserted top-level rows
+
+        Raises:
+            RuntimeError: if ``self.bike_file`` is open in Bike.app with
+                unsaved changes and no ``output_path`` was given
         """
-        doc = self.ensure_overall_open()
+        parent_id = parent_row.id if isinstance(parent_row, BikeRow) else parent_row
+        target_path = Path(output_path) if output_path is not None else self.bike_file
 
-        # Convert markdown to panflute
-        pandoc_json = pypandoc.convert_text(
-            markdown,
-            to='json',
-            format=SOURCE_MARKDOWN_FORMAT
+        same_file = (
+            Path(target_path).expanduser().resolve()
+            == Path(self.bike_file).expanduser().resolve()
         )
+        if same_file:
+            open_doc = self.get_overall_document()
+            if open_doc is not None and open_doc.modified:
+                raise RuntimeError(
+                    f"{self.bike_file} is open in Bike.app with unsaved "
+                    "changes; save or close it in Bike.app first, or pass "
+                    "output_path= to write the import elsewhere."
+                )
 
-        # Convert to bike format
-        pfd = pf.load(json.dumps(pandoc_json))
-        etree = panflute_to_bike_etree(pfd)
-
-        # Get the new content as bike XML
-        bike_xml = ET.tostring(etree, encoding='unicode', pretty_print=True)
-
-        # TODO: Actually insert into Bike using AppleScript
-        # For now, this would require creating rows via appscript
-        # which is more complex. Return empty list as placeholder.
-
-        raise NotImplementedError(
-            "Importing markdown to Bike requires additional AppleScript work. "
-            "For now, manually copy markdown and paste into Bike."
+        return mdimport.import_markdown_into_file(
+            self.bike_file,
+            markdown,
+            output_path=target_path,
+            parent_id=parent_id,
+            position=position,
         )
 
     def get_row_context(
