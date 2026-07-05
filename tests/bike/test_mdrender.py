@@ -144,6 +144,42 @@ def test_prose_note_children_stay_inside_callout():
     assert "> [!note] note parent\n> - note child" in out
 
 
+def _two_quote_rows_doc(first_has_child: bool) -> BikeDoc:
+    child = '<ul><li id="c1"><p>c1</p></li></ul>' if first_has_child else ""
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><meta charset="utf-8"/></head>
+  <body>
+    <ul id="root">
+      <li id="q1" data-type="quote"><p>q1</p>{child}</li>
+      <li id="q2" data-type="quote"><p>q2</p></li>
+    </ul>
+  </body>
+</html>
+""".encode("utf-8")
+    return BikeDoc.from_bytes(xml)
+
+
+@pytest.mark.parametrize("style", ["prose", "sections"])
+def test_quote_run_blank_line_after_children_before_next_quote(style):
+    """A quote row's child list must be followed by a blank quoted line
+    ("> ") before the NEXT quote paragraph, or pandoc/CommonMark treats
+    that next paragraph as a lazy continuation of the child list's last
+    item (a soft break) instead of its own paragraph."""
+    doc = _two_quote_rows_doc(first_has_child=True)
+    out = get_style(style).render(doc.roots)
+    assert "> q1\n> - c1\n>\n> q2" in out
+
+
+@pytest.mark.parametrize("style", ["prose", "sections"])
+def test_quote_run_no_spurious_blank_line_without_children(style):
+    """No unnecessary blank quoted line when nothing needs separating."""
+    doc = _two_quote_rows_doc(first_has_child=False)
+    out = get_style(style).render(doc.roots)
+    assert "> q1\n> q2" in out
+    assert ">\n" not in out
+
+
 def test_hr_row_renders(doc):
     assert "\n---\n" in get_style("prose").render(doc.roots)
     assert "\n---\n" in get_style("sections").render(doc.roots)

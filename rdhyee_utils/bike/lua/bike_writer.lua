@@ -221,7 +221,19 @@ blocks_to_rows = function(blocks)
       -- as ITS child so it stays nested inside the blockquote instead of
       -- becoming an unrelated top-level sibling (blocks_to_rows() on its
       -- own only nests things under headings, so e.g. "> text\n> - item"
-      -- would otherwise come back as two disconnected top-level rows)
+      -- would otherwise come back as two disconnected top-level rows).
+      --
+      -- Known gaps (documented, not fixed — narrow enough to accept for
+      -- now; see test_writer_blockquote_edge_cases in
+      -- tests/bike/test_writer_and_import.py for the exact behavior):
+      --   * a blockquote with NO leading paragraph (e.g. "> - item\n> -
+      --     item", a list with nothing to attach to) has no row to
+      --     promote to "quote" at all, so its items surface as plain
+      --     top-level unordered rows with no indication they were ever
+      --     quoted.
+      --   * a nested blockquote ("> outer\n>\n> > inner") becomes two
+      --     SIBLING quote rows rather than an inner quote nested as a
+      --     child of the outer one.
       local inner_rows = blocks_to_rows(b.content)
       local current_quote = nil
       for _, row in ipairs(inner_rows) do

@@ -139,6 +139,34 @@ def _runs(rows: Iterable[Row], key) -> List[List[Row]]:
     return groups
 
 
+def _render_quote_run(run: Sequence[Row], emit_children) -> str:
+    """
+    Shared by SectionsStyle and ProseStyle: render a run of consecutive
+    quote rows as ONE blockquote. Every line — including a quote row's
+    child-list lines — needs a "> " prefix to stay inside it.
+
+    A children-bearing quote row must be followed by a blank quoted line
+    ("``>``") before the next quote paragraph, or CommonMark treats that
+    next paragraph as a lazy continuation of the child list's last item
+    (a soft break inside the list item) instead of a new paragraph —
+    verified against pandoc's gfm reader.
+
+    ``emit_children(rows, lines)`` appends this style's rendering of a
+    quote row's children (a Row sequence) into ``lines``.
+    """
+    quote_lines: List[str] = []
+    for r in run:
+        quote_lines.append(f"> {row_markdown(r)}")
+        if r.children:
+            child_lines: List[str] = []
+            emit_children(r.children, child_lines)
+            quote_lines.extend(f"> {line}" for line in child_lines)
+            quote_lines.append(">")
+    if quote_lines and quote_lines[-1] == ">":
+        quote_lines.pop()  # no trailing blank quoted line needed
+    return "\n".join(quote_lines)
+
+
 class OutlineStyle(Style):
     """
     ``outline`` — every row is a bullet; nesting mirrors the Bike tree 1:1.
@@ -280,13 +308,9 @@ class SectionsStyle(Style):
                 code = "\n".join(r.text for r in run)
                 blocks.append(f"```\n{code}\n```")
             elif k == "quote":
-                quote_lines: List[str] = []
-                for r in run:
-                    quote_lines.append(f"> {row_markdown(r)}")
-                    child_lines: List[str] = []
-                    outline._emit(r.children, "", child_lines)
-                    quote_lines.extend(f"> {line}" for line in child_lines)
-                blocks.append("\n".join(quote_lines))
+                blocks.append(
+                    _render_quote_run(run, lambda rows, lines: outline._emit(rows, "", lines))
+                )
             elif k == "hr":
                 blocks.append("---")
             else:
@@ -348,14 +372,9 @@ class ProseStyle(Style):
             elif kind == "quote":
                 # children stay INSIDE the blockquote (each line "> "-prefixed),
                 # same rule as SectionsStyle._content_blocks
-                quote_lines: List[str] = []
-                for r in run:
-                    quote_lines.append(f"> {row_markdown(r)}")
-                    if r.children:
-                        child_lines: List[str] = []
-                        self._emit_list(r.children, 0, child_lines)
-                        quote_lines.extend(f"> {line}" for line in child_lines)
-                blocks.append("\n".join(quote_lines))
+                blocks.append(
+                    _render_quote_run(run, lambda rows, lines: self._emit_list(rows, 0, lines))
+                )
             else:
                 for row in run:
                     self._emit_block_row(row, heading_level, blocks)

@@ -121,13 +121,15 @@ def insert_rows(
     Args:
         doc: target document (mutated in place; caller decides when/where
              to write — this function never touches the filesystem)
-        rows: a FRESH forest not already attached to ``doc`` (or any other
-             document) — e.g. from :func:`markdown_to_rows`. Reusing the
-             same Row objects across more than one insert_rows() call
-             corrupts the tree (the same object would land twice in a
-             children list); this is checked and raises ValueError rather
-             than silently corrupting. :func:`insert_markdown` always
-             builds a fresh forest per call, so calling it repeatedly is
+        rows: a FRESH forest — e.g. from :func:`markdown_to_rows`. Every Row
+             object in it must appear exactly once, and none may already be
+             part of ``doc``'s tree; both are checked (raises ValueError
+             rather than silently corrupting the tree — the same object
+             landing twice in a children list). Note the check is scoped to
+             ``doc`` and ``rows`` themselves: it does NOT detect a row
+             that's already attached to some OTHER BikeDoc you happen to
+             still hold a reference to. :func:`insert_markdown` always
+             builds a brand-new forest per call, so calling it repeatedly is
              safe — this caveat is only for direct insert_rows() callers.
         parent_id: id of the row to insert under; ``None`` = document root
         position: ``"append"`` (after existing children) or ``"prepend"``
@@ -137,7 +139,7 @@ def insert_rows(
 
     Raises:
         ValueError: if any row in ``rows`` (or its descendants) is already
-            part of ``doc``'s tree
+            part of ``doc``'s tree, or appears more than once in ``rows``
     """
     doc_rows = set()
     existing = set()
@@ -147,15 +149,24 @@ def insert_rows(
             existing.add(row.attrs["id"])
     existing.add(doc.root_ul_id)
 
+    seen_incoming = set()
     for root in rows:
         for row, _ in root.walk():
-            if id(row) in doc_rows:
+            row_identity = id(row)
+            if row_identity in doc_rows:
                 raise ValueError(
                     "insert_rows() was given a Row already present in the "
                     "target document; reusing the same Row objects across "
                     "multiple insert_rows() calls corrupts the tree. Build "
                     "a fresh forest per call (e.g. via markdown_to_rows())."
                 )
+            if row_identity in seen_incoming:
+                raise ValueError(
+                    "insert_rows() was given the same Row object more than "
+                    "once in the incoming forest (e.g. rows=[row, row]); "
+                    "each row must appear exactly once."
+                )
+            seen_incoming.add(row_identity)
 
     _rekey_collisions(rows, existing)
 

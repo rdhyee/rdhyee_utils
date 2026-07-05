@@ -124,6 +124,27 @@ def test_writer_nests_list_inside_blockquote():
     assert doc.validate() == []
 
 
+def test_writer_blockquote_edge_cases_are_known_limitations():
+    """Pins down two documented (not fixed) gaps in the BlockQuote handling
+    — see the comment above the BlockQuote branch in bike_writer.lua. If
+    either of these ever starts producing properly-nested quote rows,
+    that's a welcome improvement: update this test rather than treat it as
+    a regression."""
+    # a blockquote with no leading paragraph has nothing to promote to
+    # "quote": items surface as plain top-level unordered rows.
+    list_only = BikeDoc.from_bytes(
+        md_to_bike_bytes("> - quoted bullet\n> - second\n")
+    )
+    assert [r.row_type for r in list_only.roots] == ["unordered", "unordered"]
+
+    # a nested blockquote becomes sibling quote rows, not nested ones.
+    nested = BikeDoc.from_bytes(
+        md_to_bike_bytes("> outer\n>\n> > inner\n")
+    )
+    assert [r.row_type for r in nested.roots] == ["quote", "quote"]
+    assert [r.text for r in nested.roots] == ["outer", "inner"]
+
+
 def test_reader_writer_semantic_roundtrip():
     """kitchen_sink -f bike.lua -t bike_writer.lua keeps texts and key types."""
     result = subprocess.run(
@@ -212,6 +233,17 @@ def test_insert_rows_rejects_reused_row_objects():
     with pytest.raises(ValueError, match="already present"):
         mdimport.insert_rows(doc, rows)  # reusing the same objects: not fine
     assert doc.validate() == []  # the failed second call left no corruption
+
+
+def test_insert_rows_rejects_duplicate_object_within_incoming_forest():
+    """The same Row object appearing twice in ONE call's ``rows`` (e.g.
+    rows=[row, row]) is just as corrupting as reuse across calls — must be
+    rejected before any mutation, not just cross-call reuse."""
+    doc = BikeDoc.from_path(KITCHEN_SINK)
+    row = mdimport.markdown_to_rows("one row\n")[0]
+    with pytest.raises(ValueError, match="more than once"):
+        mdimport.insert_rows(doc, [row, row])
+    assert doc.validate() == []
 
 
 def test_import_markdown_into_file(tmp_path):
