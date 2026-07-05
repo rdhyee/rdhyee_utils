@@ -112,6 +112,38 @@ def test_prose_note_becomes_callout(doc):
     assert "> [!note] A note row" in get_style("prose").render(doc.roots)
 
 
+def _one_row_doc(rtype: str, text: str, child_text: str) -> BikeDoc:
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><meta charset="utf-8"/></head>
+  <body>
+    <ul id="root">
+      <li id="p1" data-type="{rtype}"><p>{text}</p>
+        <ul><li id="c1"><p>{child_text}</p></li></ul>
+      </li>
+    </ul>
+  </body>
+</html>
+""".encode("utf-8")
+    return BikeDoc.from_bytes(xml)
+
+
+def test_prose_quote_children_stay_inside_blockquote():
+    """A quote row's children must every line be "> "-prefixed so they stay
+    part of the SAME blockquote, not become an unrelated top-level list."""
+    doc = _one_row_doc("quote", "quote parent", "quoted child")
+    out = get_style("prose").render(doc.roots)
+    assert "> quote parent\n> - quoted child" in out
+
+
+def test_prose_note_children_stay_inside_callout():
+    """Same rule for Obsidian callouts: every continuation line needs '> '
+    or Obsidian stops treating it as part of the callout."""
+    doc = _one_row_doc("note", "note parent", "note child")
+    out = get_style("prose").render(doc.roots)
+    assert "> [!note] note parent\n> - note child" in out
+
+
 def test_hr_row_renders(doc):
     assert "\n---\n" in get_style("prose").render(doc.roots)
     assert "\n---\n" in get_style("sections").render(doc.roots)

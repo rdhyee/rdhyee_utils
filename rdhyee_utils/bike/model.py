@@ -26,6 +26,16 @@ Design notes
   re-serialized verbatim.  Renderers get both the raw inline tree and a
   plain-text view.
 
+Known scope limits of the round-trip guarantee: it is verified against real
+Bike.app output specifically, which (so far, empirically) is always LF-only
+with a bare ``<body>`` tag and a bare ``<ul id="...">`` root. The outline
+body is always re-serialized with ``\n`` line endings, so a hand-edited or
+hypothetical file using CRLF line endings *below* the ``<body>`` line, a
+``<body>`` tag carrying attributes, or a root ``<ul>`` carrying attributes
+beyond ``id`` would NOT round-trip byte-identically — only the head/prolog
+up to and including ``<body>`` is preserved verbatim as raw bytes; everything
+after that point is re-derived from the parsed model, not copied through.
+
 This module depends only on lxml (no pandoc/panflute/AppleScript), so it can
 be used headlessly and in tests.  The pandoc bridge lives in ``bikeformat``;
 the AppleScript bridge lives in ``bike.__init__``.
@@ -341,6 +351,9 @@ class BikeDoc:
         seen_ids = set()
         if not ID_RE.match(self.root_ul_id or ""):
             problems.append(f"root ul id {self.root_ul_id!r} is not a valid id")
+        elif self.root_ul_id is not None:
+            # seed with the root id so a row can't silently reuse it
+            seen_ids.add(self.root_ul_id)
         for row, _ in self.walk():
             rid = row.attrs.get("id")
             if rid is None:

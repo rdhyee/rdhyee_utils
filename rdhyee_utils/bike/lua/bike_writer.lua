@@ -216,11 +216,26 @@ blocks_to_rows = function(blocks)
         sink(new_row("code", escape_text(line)))
       end
     elseif b.t == "BlockQuote" then
-      -- quote paragraphs become quote rows; nested structure → children
+      -- quote paragraphs become quote rows; anything that follows a quote
+      -- row within this blockquote (lists, nested quotes, etc.) attaches
+      -- as ITS child so it stays nested inside the blockquote instead of
+      -- becoming an unrelated top-level sibling (blocks_to_rows() on its
+      -- own only nests things under headings, so e.g. "> text\n> - item"
+      -- would otherwise come back as two disconnected top-level rows)
       local inner_rows = blocks_to_rows(b.content)
+      local current_quote = nil
       for _, row in ipairs(inner_rows) do
-        if row.rtype == "body" then row.rtype = "quote" end
-        sink(row)
+        if row.rtype == "body" then
+          row.rtype = "quote"
+        end
+        if row.rtype == "quote" then
+          sink(row)
+          current_quote = row
+        elseif current_quote then
+          table.insert(current_quote.children, row)
+        else
+          sink(row)
+        end
       end
     elseif b.t == "HorizontalRule" then
       sink(new_row("hr", ""))

@@ -131,6 +131,14 @@ def test_validate_flags_duplicate_ids(doc):
     assert any("duplicate id" in p for p in problems)
 
 
+def test_validate_flags_row_id_colliding_with_root(doc):
+    """A row reusing the document's own root <ul> id is a real collision
+    (two elements sharing one id), not just a sibling-row collision."""
+    doc.find_by_id("t1").attrs["id"] = doc.root_ul_id
+    problems = doc.validate()
+    assert any("duplicate id" in p for p in problems)
+
+
 def test_validate_flags_unknown_type(doc):
     doc.find_by_id("b1").attrs["data-type"] = "wibble"
     assert any("unknown data-type" in p for p in doc.validate())

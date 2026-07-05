@@ -109,6 +109,21 @@ def test_writer_structure_and_types():
     assert any(r.row_type == "hr" for r, _ in doc.walk())
 
 
+def test_writer_nests_list_inside_blockquote():
+    """A list following a paragraph inside a > blockquote must attach as
+    the quote row's CHILD, not become an unrelated top-level sibling row
+    (the writer's own blocks_to_rows() only nests things under headings by
+    default, so BlockQuote handling has to do this explicitly)."""
+    md = "> quote paragraph\n>\n> - quoted bullet\n> - another bullet\n"
+    doc = BikeDoc.from_bytes(md_to_bike_bytes(md))
+    assert [r.row_type for r in doc.roots] == ["quote"]
+    quote_row = doc.roots[0]
+    assert quote_row.text == "quote paragraph"
+    assert [c.row_type for c in quote_row.children] == ["unordered", "unordered"]
+    assert [c.text for c in quote_row.children] == ["quoted bullet", "another bullet"]
+    assert doc.validate() == []
+
+
 def test_reader_writer_semantic_roundtrip():
     """kitchen_sink -f bike.lua -t bike_writer.lua keeps texts and key types."""
     result = subprocess.run(
@@ -184,6 +199,19 @@ def test_double_import_rekeys_colliding_ids():
     ids2 = mdimport.insert_markdown(doc, "second import\n")
     assert set(ids1).isdisjoint(ids2)
     assert doc.validate() == []  # validate() also checks global id uniqueness
+
+
+def test_insert_rows_rejects_reused_row_objects():
+    """insert_rows() is a lower-level API than insert_markdown(); if a
+    caller reuses the same Row objects across two calls (instead of
+    building a fresh forest each time) that would silently duplicate the
+    same object inside the tree. Must raise instead of corrupting."""
+    doc = BikeDoc.from_path(KITCHEN_SINK)
+    rows = mdimport.markdown_to_rows("one row\n")
+    mdimport.insert_rows(doc, rows)  # first insert: fine
+    with pytest.raises(ValueError, match="already present"):
+        mdimport.insert_rows(doc, rows)  # reusing the same objects: not fine
+    assert doc.validate() == []  # the failed second call left no corruption
 
 
 def test_import_markdown_into_file(tmp_path):

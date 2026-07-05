@@ -18,6 +18,16 @@ not something buried in conversion code.  Three built-in styles:
 Content is rendered **verbatim** — no smoothing, no rewriting.  All styles
 skip Bike's empty spacer rows.
 
+Known limitation: "verbatim" means the row's *text* is preserved unchanged,
+not that the output is safe from markdown reinterpretation. Row text that
+happens to look like markdown syntax (e.g. a body row whose text literally
+starts with ``# `` or ``[ ] ``) will render as that syntax (a heading, a
+task) rather than as escaped literal text — plain-text characters are not
+escaped on the way out. This mirrors how the row's own ``data-type`` (not
+its text) decides structure, so it's a pre-existing tradeoff, not something
+introduced here; flagging it because a naive reading of "verbatim" could
+suggest otherwise.
+
 Shared inline mapping (all styles):
 
 ===========  =====================
@@ -336,12 +346,16 @@ class ProseStyle(Style):
                 code = "\n".join(r.text for r in run)
                 blocks.append(f"```\n{code}\n```")
             elif kind == "quote":
-                blocks.append("\n".join(f"> {row_markdown(r)}" for r in run))
+                # children stay INSIDE the blockquote (each line "> "-prefixed),
+                # same rule as SectionsStyle._content_blocks
+                quote_lines: List[str] = []
                 for r in run:
+                    quote_lines.append(f"> {row_markdown(r)}")
                     if r.children:
-                        lines = []
-                        self._emit_list(r.children, 0, lines)
-                        blocks.append("\n".join(lines))
+                        child_lines: List[str] = []
+                        self._emit_list(r.children, 0, child_lines)
+                        quote_lines.extend(f"> {line}" for line in child_lines)
+                blocks.append("\n".join(quote_lines))
             else:
                 for row in run:
                     self._emit_block_row(row, heading_level, blocks)
@@ -359,11 +373,14 @@ class ProseStyle(Style):
         elif rtype == "hr":
             blocks.append("---")
         elif rtype == "note":
-            blocks.append(f"> [!note] {text}")
+            # children stay INSIDE the callout (every line "> "-prefixed) —
+            # same rule as the quote case above
+            note_lines = [f"> [!note] {text}"]
             if row.children:
-                lines: List[str] = []
-                self._emit_list(row.children, 0, lines)
-                blocks.append("\n".join(lines))
+                child_lines: List[str] = []
+                self._emit_list(row.children, 0, child_lines)
+                note_lines.extend(f"> {line}" for line in child_lines)
+            blocks.append("\n".join(note_lines))
         elif rtype == "code":
             # childless code runs are handled in _emit_blocks; a code row
             # with children degrades to paragraph-with-sublist

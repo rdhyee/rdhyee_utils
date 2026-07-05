@@ -121,15 +121,42 @@ def insert_rows(
     Args:
         doc: target document (mutated in place; caller decides when/where
              to write — this function never touches the filesystem)
-        rows: forest to insert (e.g. from :func:`markdown_to_rows`)
+        rows: a FRESH forest not already attached to ``doc`` (or any other
+             document) — e.g. from :func:`markdown_to_rows`. Reusing the
+             same Row objects across more than one insert_rows() call
+             corrupts the tree (the same object would land twice in a
+             children list); this is checked and raises ValueError rather
+             than silently corrupting. :func:`insert_markdown` always
+             builds a fresh forest per call, so calling it repeatedly is
+             safe — this caveat is only for direct insert_rows() callers.
         parent_id: id of the row to insert under; ``None`` = document root
         position: ``"append"`` (after existing children) or ``"prepend"``
 
     Returns:
         ids of the inserted top-level rows (post collision-rekeying)
+
+    Raises:
+        ValueError: if any row in ``rows`` (or its descendants) is already
+            part of ``doc``'s tree
     """
-    existing = {row.attrs["id"] for row, _ in doc.walk() if "id" in row.attrs}
+    doc_rows = set()
+    existing = set()
+    for row, _ in doc.walk():
+        doc_rows.add(id(row))
+        if "id" in row.attrs:
+            existing.add(row.attrs["id"])
     existing.add(doc.root_ul_id)
+
+    for root in rows:
+        for row, _ in root.walk():
+            if id(row) in doc_rows:
+                raise ValueError(
+                    "insert_rows() was given a Row already present in the "
+                    "target document; reusing the same Row objects across "
+                    "multiple insert_rows() calls corrupts the tree. Build "
+                    "a fresh forest per call (e.g. via markdown_to_rows())."
+                )
+
     _rekey_collisions(rows, existing)
 
     if parent_id is None:
