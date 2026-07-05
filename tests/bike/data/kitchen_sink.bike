@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8"/>
+  </head>
+  <body>
+    <ul id="rootUL01">
+      <li id="h1" data-created="2024-01-01T00:00:00Z" data-modified="2024-01-02T00:00:00Z" data-type="heading">
+        <p>Project Alpha</p>
+        <ul>
+          <li id="b1">
+            <p>Intro paragraph with <strong>bold</strong> and <em>italic</em> and <code>inline_code</code>.</p>
+          </li>
+          <li id="b2">
+            <p>Link to <a href="https://example.com/?a=1&amp;b=2">Example &amp; Co</a> with <mark>highlight</mark> and <s>struck</s> and <span>a span</span>.</p>
+          </li>
+          <li id="sp1">
+            <p/>
+          </li>
+          <li id="t1" data-type="task">
+            <p>Open task</p>
+          </li>
+          <li id="t2" data-done="2024-02-03T04:05:06Z" data-type="task">
+            <p>Done task</p>
+            <ul>
+              <li id="t2a" data-type="task">
+                <p>Nested subtask</p>
+              </li>
+            </ul>
+          </li>
+          <li id="h2" data-type="heading">
+            <p>Details</p>
+            <ul>
+              <li id="q1" data-type="quote">
+                <p>First quoted line</p>
+              </li>
+              <li id="q2" data-type="quote">
+                <p>Second quoted line</p>
+              </li>
+              <li id="c1" data-type="code">
+                <p>def hello():</p>
+              </li>
+              <li id="c2" data-type="code">
+                <p>    return "world"</p>
+              </li>
+              <li id="o1" data-type="ordered">
+                <p>step one</p>
+              </li>
+              <li id="o2" data-type="ordered">
+                <p>step two</p>
+                <ul>
+                  <li id="u1" data-type="unordered">
+                    <p>sub bullet</p>
+                  </li>
+                </ul>
+              </li>
+              <li id="hr1" data-type="hr">
+                <p/>
+              </li>
+              <li id="n1" data-type="note">
+                <p>A note row</p>
+              </li>
+            </ul>
+          </li>
+          <li id="body2" data-indent="2">
+            <p>Body row with children (the lossiness case)</p>
+            <ul>
+              <li id="nested1">
+                <p>nested plain child</p>
+                <ul>
+                  <li id="nesth" data-type="heading">
+                    <p>Heading buried under body rows</p>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li id="h9" data-type="heading">
+        <p>Second Topic — unicode ✓ 中文</p>
+        <ul>
+          <li id="z1">
+            <p>Multiline attr link: <a href="#line1&#10;line2">anchor</a> and 3 &gt; 2 &lt; 5.</p>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </body>
+</html>
