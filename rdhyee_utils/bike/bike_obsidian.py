@@ -8,6 +8,7 @@ Designed for use by Claude Code and automation workflows.
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any
 import json
+import subprocess
 from datetime import datetime
 
 from lxml import etree as ET
@@ -41,6 +42,33 @@ DEST_MARKDOWN_FORMAT = (
     "markdown+lists_without_preceding_blankline+wikilinks_title_after_pipe+mark"
     "-native_divs-native_spans-header_attributes-link_attributes"
 )
+
+
+def _bike_is_running() -> bool:
+    """
+    True if Bike.app is already running. Checked via a plain process query
+    (not AppleScript) because sending Bike an AppleEvent — e.g. querying
+    its documents — auto-launches it if it isn't running, which would be a
+    surprising side effect of a mere safety check.
+    """
+    try:
+        return subprocess.run(["pgrep", "-x", "Bike"], capture_output=True).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def _same_path(a: Union[str, Path], b: Union[str, Path]) -> bool:
+    """
+    True if ``a`` and ``b`` name the same file. Prefers ``Path.samefile()``
+    (correct for symlinks, hard links, and case-insensitive filesystems);
+    falls back to normalized-path comparison only when one side doesn't
+    exist yet (e.g. a fresh output_path), where samefile() can't be used.
+    """
+    a, b = Path(a).expanduser(), Path(b).expanduser()
+    try:
+        return a.samefile(b)
+    except OSError:
+        return a.resolve() == b.resolve()
 
 
 class BikeObsidianBridge:
@@ -346,12 +374,19 @@ class BikeObsidianBridge:
         Because there is no AppleScript "revert"/reload verb, overwriting
         ``self.bike_file`` on disk while Bike.app has it open with unsaved
         edits would risk losing those edits when the human later saves from
-        the GUI. This method refuses to write in that situation unless an
-        explicit ``output_path`` is given (writing elsewhere is always
-        safe). When the target file *is* open in Bike.app (with no unsaved
-        changes, or via ``output_path``), Bike.app will show "File Changed
-        on Disk" and the human uses File > Revert to Saved to pick up the
-        change — this method does not attempt to automate that.
+        the GUI. This method refuses to write to any path that resolves to
+        the SAME file as ``self.bike_file`` (via ``Path.samefile()``, so
+        symlinks/hard links/case-insensitive-filesystem aliases are caught,
+        not just an exact string match) while that file is open in Bike.app
+        with unsaved changes; writing to a genuinely different path is
+        always safe regardless of Bike.app's state. The open/modified check
+        itself only runs if Bike.app is already running — querying it via
+        AppleScript when it isn't would auto-launch it, a surprising side
+        effect for what's meant to be a plain safety check. When the target
+        file *is* open in Bike.app (with no unsaved changes), Bike.app will
+        show "File Changed on Disk" and the human uses File > Revert to
+        Saved to pick up the change — this method does not attempt to
+        automate that.
 
         Args:
             markdown: Markdown text to import
@@ -360,8 +395,8 @@ class BikeObsidianBridge:
             position: "append" (default) or "prepend" among the parent's
                 existing children
             output_path: explicit write target; defaults to ``self.bike_file``
-                (in place). Required (and always honored) if the file is
-                open in Bike.app with unsaved changes.
+                (in place). A path that resolves to the same file as
+                ``self.bike_file`` is still guarded — see above.
 
         Returns:
             ids of the newly inserted top-level rows
@@ -373,11 +408,9 @@ class BikeObsidianBridge:
         parent_id = parent_row.id if isinstance(parent_row, BikeRow) else parent_row
         target_path = Path(output_path) if output_path is not None else self.bike_file
 
-        same_file = (
-            Path(target_path).expanduser().resolve()
-            == Path(self.bike_file).expanduser().resolve()
-        )
-        if same_file:
+        # only query Bike.app (which can auto-launch it) if there's an
+        # actual aliasing risk to check for
+        if _same_path(target_path, self.bike_file) and _bike_is_running():
             open_doc = self.get_overall_document()
             if open_doc is not None and open_doc.modified:
                 raise RuntimeError(
