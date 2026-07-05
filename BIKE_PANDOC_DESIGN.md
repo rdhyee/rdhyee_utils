@@ -1,8 +1,8 @@
 # Bike as a First-Class Pandoc Format — Design
 
-**Date**: 2026-07-05 (overnight Fable session)
-**Status**: reader MVP **built and tested**; writer direction **designed, not built**
-**Companion code**: `rdhyee_utils/bike/model.py` (tree model), `rdhyee_utils/bike/lua/bike.lua` (pandoc reader), `rdhyee_utils/bike/bikeformat.py` (prior panflute work)
+**Date**: 2026-07-05 (overnight Fable session; writer added same night)
+**Status**: reader MVP **built and tested**; writer + model-level import **built and tested** (see §3b)
+**Companion code**: `rdhyee_utils/bike/model.py` (tree model), `rdhyee_utils/bike/lua/bike.lua` (pandoc reader), `rdhyee_utils/bike/lua/bike_writer.lua` (pandoc writer), `rdhyee_utils/bike/mdimport.py` (markdown grafting), `rdhyee_utils/bike/bikeformat.py` (prior panflute work)
 
 ## 1. Where Raymond's earlier pandoc work got to (prior-art assessment)
 
@@ -82,6 +82,41 @@ markdown in ~3.3 s. Smoke-tested via `tests/bike/test_lua_reader.py` (gfm
 content checks, nesting preservation, header-id survival, docx generation);
 tests skip when pandoc is absent.
 
+## 3b. The writer direction (built same night, on the team lead's steer)
+
+`rdhyee_utils/bike/lua/bike_writer.lua` — a pandoc **Writer**, so any
+pandoc-readable format can become a `.bike` file:
+
+```bash
+pandoc -f gfm note.md -t rdhyee_utils/bike/lua/bike_writer.lua -o note.bike
+```
+
+Block mapping is the inverse of the reader's (Header→heading rows with
+outline-ization by level; GFM task items → task rows with `data-done`;
+CodeBlock → one code row per line; BlockQuote→quote rows; Div.note→note
+rows; tables — which Bike can't represent — flatten to body rows).
+
+**Serialization conformance is enforced, not hoped for**: the writer emits
+Bike.app's exact file style, and the test suite asserts
+`BikeDoc.from_bytes(output).to_bytes() == output` plus `validate() == []`.
+A reader→writer semantic round-trip test on the kitchen-sink fixture
+verifies every substantive row's text survives in order, tasks keep their
+done state, and the heading spine survives.
+
+**The "???" import step is closed** by `rdhyee_utils/bike/mdimport.py`,
+which grafts at the model level: `markdown → pandoc(-t bike_writer.lua) →
+BikeDoc rows → insert_rows()` with collision-free id re-keying, under any
+parent row, append or prepend. `import_markdown_into_file()` requires an
+explicit output path — in-place modification is a deliberate caller
+decision (after which Bike.app prompts "Revert to Saved").
+
+*Relationship to `BikeObsidianBridge.import_markdown_to_bike()`*: the
+committed version of that method raises `NotImplementedError`; a working
+file-write implementation exists in the (uncommitted) 2025-11 working
+tree via the panflute path. `mdimport` is the committed, tested,
+model-based equivalent; when the bridge work lands, the method can
+delegate here.
+
 ## 4. Known limitations of the MVP (deliberate)
 
 - **Line-regular input assumed.** Files written by Bike.app (or by
@@ -98,15 +133,11 @@ tests skip when pandoc is absent.
 
 ## 5. Designed but NOT built (the roadmap)
 
-1. **Writer direction (`-t bike`)** — a custom Lua *writer* so pandoc can emit
-   `.bike`: markdown → Bike for the "restructure in Bike" half of the
-   [[Bike-Obsidian Triage Pipeline]] vision. Design: map Header→heading row,
-   ordered/bullet lists→typed rows, CodeBlock→one code row per line,
-   BlockQuote→quote rows, Para→body rows; generate ids with the documented
-   `[A-Za-z0-9_-]` alphabet; serialize in Bike's byte-exact style (the grammar
-   lives in `model.py::Row.to_lines` — port of ~40 lines to Lua).
-   Until then the Python path (`bike_obsidian._panflute_blocks_to_bike_lis`)
-   covers this direction.
+1. ~~**Writer direction (`-t bike`)**~~ — **BUILT** same night (§3b):
+   `bike_writer.lua` + `mdimport.py`. Remaining writer-side gaps: inline
+   footnotes are dropped; tables flatten to stringified body rows;
+   `data-done` timestamps on imported checked tasks are epoch placeholders
+   (pandoc's AST has no completion date to carry).
 2. **Style parity** — the Lua reader implements `prose` only. `outline` /
    `sections` equivalents could be reader extensions, but the cheaper path is:
    keep style choice in Python (`mdrender`), use the Lua reader when the
@@ -122,9 +153,12 @@ tests skip when pandoc is absent.
 ## 6. Test & verification summary
 
 ```
-tests/bike/test_model.py      — 20 tests (round-trip byte-compare incl. real files)
-tests/bike/test_mdrender.py   — 18 tests (golden renders, style rules)
-tests/bike/test_lua_reader.py —  4 tests (pandoc smoke: gfm, native, docx)
+tests/bike/test_model.py            — 20 tests (round-trip byte-compare incl. real files)
+tests/bike/test_mdrender.py         — 18 tests (golden renders, style rules)
+tests/bike/test_lua_reader.py       —  4 tests (pandoc smoke: gfm, native, docx)
+tests/bike/test_writer_and_import.py —  8 tests (writer conformance, semantic
+                                        reader↔writer round-trip, grafting,
+                                        id-collision re-keying, file import)
 ```
 
 <!-- cc:2026.07.05 -->
