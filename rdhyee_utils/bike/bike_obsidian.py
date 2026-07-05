@@ -8,6 +8,7 @@ Designed for use by Claude Code and automation workflows.
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any
 import json
+import subprocess
 from datetime import datetime
 
 from lxml import etree as ET
@@ -15,6 +16,7 @@ import panflute as pf
 import pypandoc
 
 from rdhyee_utils.bike import Bike, BikeDocument, BikeRow
+from rdhyee_utils.bike import mdimport
 from rdhyee_utils.bike.bikeformat import (
     namespaces,
     bike_etree_to_panflute,
@@ -40,6 +42,33 @@ DEST_MARKDOWN_FORMAT = (
     "markdown+lists_without_preceding_blankline+wikilinks_title_after_pipe+mark"
     "-native_divs-native_spans-header_attributes-link_attributes"
 )
+
+
+def _bike_is_running() -> bool:
+    """
+    True if Bike.app is already running. Checked via a plain process query
+    (not AppleScript) because sending Bike an AppleEvent — e.g. querying
+    its documents — auto-launches it if it isn't running, which would be a
+    surprising side effect of a mere safety check.
+    """
+    try:
+        return subprocess.run(["pgrep", "-x", "Bike"], capture_output=True).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def _same_path(a: Union[str, Path], b: Union[str, Path]) -> bool:
+    """
+    True if ``a`` and ``b`` name the same file. Prefers ``Path.samefile()``
+    (correct for symlinks, hard links, and case-insensitive filesystems);
+    falls back to normalized-path comparison only when one side doesn't
+    exist yet (e.g. a fresh output_path), where samefile() can't be used.
+    """
+    a, b = Path(a).expanduser(), Path(b).expanduser()
+    try:
+        return a.samefile(b)
+    except OSError:
+        return a.resolve() == b.resolve()
 
 
 class BikeObsidianBridge:
@@ -319,41 +348,83 @@ class BikeObsidianBridge:
     def import_markdown_to_bike(
         self,
         markdown: str,
-        parent_row: Optional[Union[BikeRow, str]] = None
-    ) -> List[BikeRow]:
+        parent_row: Optional[Union[BikeRow, str]] = None,
+        position: str = "append",
+        output_path: Optional[Union[str, Path]] = None,
+    ) -> List[str]:
         """
-        Import markdown into Bike as new rows.
+        Import markdown into Bike as new rows, on the file-level tree model
+        (this closes the "???" step named in the 2025-11-21 dev-journal
+        gap: ``Markdown -> panflute -> Bike XML -> ??? -> Bike.app``).
+
+        This delegates to the tested, model-based grafting in
+        ``rdhyee_utils.bike.mdimport`` (``markdown -> pandoc(-t
+        bike_writer.lua) -> BikeDoc rows -> insert_rows()`` with
+        collision-free id re-keying) rather than driving Bike.app live via
+        AppleScript. That's a deliberate, honest scope decision: the
+        AppleScript object model here (``Bike``/``BikeDocument``/``BikeRow``
+        in ``rdhyee_utils/bike/__init__.py``) has no verb to create new rows
+        or to force a reload from disk, so a live-AppleScript-insertion
+        implementation is a different, larger feature and is NOT what this
+        method does. (A separate, uncommitted 2025-11 working-tree draft
+        takes the panflute route to a similar end; this is the committed,
+        tested equivalent — see ``rdhyee_utils/bike/mdimport.py`` and
+        ``BIKE_PANDOC_DESIGN.md`` for the full relationship.)
+
+        Because there is no AppleScript "revert"/reload verb, overwriting
+        ``self.bike_file`` on disk while Bike.app has it open with unsaved
+        edits would risk losing those edits when the human later saves from
+        the GUI. This method refuses to write to any path that resolves to
+        the SAME file as ``self.bike_file`` (via ``Path.samefile()``, so
+        symlinks/hard links/case-insensitive-filesystem aliases are caught,
+        not just an exact string match) while that file is open in Bike.app
+        with unsaved changes; writing to a genuinely different path is
+        always safe regardless of Bike.app's state. The open/modified check
+        itself only runs if Bike.app is already running — querying it via
+        AppleScript when it isn't would auto-launch it, a surprising side
+        effect for what's meant to be a plain safety check. When the target
+        file *is* open in Bike.app (with no unsaved changes), Bike.app will
+        show "File Changed on Disk" and the human uses File > Revert to
+        Saved to pick up the change — this method does not attempt to
+        automate that.
 
         Args:
             markdown: Markdown text to import
-            parent_row: Parent row to add under (None = root)
+            parent_row: Parent row to graft under (None = document root);
+                a ``BikeRow`` (its ``.id`` is used) or a raw row id string
+            position: "append" (default) or "prepend" among the parent's
+                existing children
+            output_path: explicit write target; defaults to ``self.bike_file``
+                (in place). A path that resolves to the same file as
+                ``self.bike_file`` is still guarded — see above.
 
         Returns:
-            List of created BikeRow objects
+            ids of the newly inserted top-level rows
+
+        Raises:
+            RuntimeError: if ``self.bike_file`` is open in Bike.app with
+                unsaved changes and no ``output_path`` was given
         """
-        doc = self.ensure_overall_open()
+        parent_id = parent_row.id if isinstance(parent_row, BikeRow) else parent_row
+        target_path = Path(output_path) if output_path is not None else self.bike_file
 
-        # Convert markdown to panflute
-        pandoc_json = pypandoc.convert_text(
+        # only query Bike.app (which can auto-launch it) if there's an
+        # actual aliasing risk to check for
+        if _same_path(target_path, self.bike_file) and _bike_is_running():
+            open_doc = self.get_overall_document()
+            if open_doc is not None and open_doc.modified:
+                raise RuntimeError(
+                    f"{self.bike_file} is open in Bike.app with unsaved "
+                    "changes; save or close it in Bike.app first, or pass "
+                    "output_path= to write the import elsewhere."
+                )
+
+        return mdimport.import_markdown_into_file(
+            self.bike_file,
             markdown,
-            to='json',
-            format=SOURCE_MARKDOWN_FORMAT
-        )
-
-        # Convert to bike format
-        pfd = pf.load(json.dumps(pandoc_json))
-        etree = panflute_to_bike_etree(pfd)
-
-        # Get the new content as bike XML
-        bike_xml = ET.tostring(etree, encoding='unicode', pretty_print=True)
-
-        # TODO: Actually insert into Bike using AppleScript
-        # For now, this would require creating rows via appscript
-        # which is more complex. Return empty list as placeholder.
-
-        raise NotImplementedError(
-            "Importing markdown to Bike requires additional AppleScript work. "
-            "For now, manually copy markdown and paste into Bike."
+            output_path=target_path,
+            parent_id=parent_id,
+            position=position,
         )
 
     def get_row_context(
