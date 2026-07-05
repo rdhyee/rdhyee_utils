@@ -19,6 +19,13 @@ working *Python-mediated* pipeline, not a pandoc-native format:
 | `change_marker.lua`, `remove_spans.lua` | `python-learning/bike/` | Tiny pandoc *filters* (AST tweaks), ~5 lines each. **No custom reader/writer was ever started in Lua** — these are the only Lua artifacts. |
 | `convert_json.sh`, `custom-template.tex` | `python-learning/bike/` | Fan-out script: pandoc JSON → docx/odt/md/LaTeX. |
 
+The definitive record of this design intent is Raymond's own journal,
+`~/dev-journal/projects/rdhyee_utils-bike.md` (2025-11-21): read path marked
+COMPLETE (`Bike.app → AppleScript → lxml → panflute → markdown`), write path
+marked PARTIAL (`Markdown → panflute → Bike XML → ??? → Bike.app` — the
+import step is the acknowledged gap). This document is consistent with that
+assessment and builds on it.
+
 **Bottom line**: Bike has been a *pre-processor feeding* pandoc (Python required,
 AppleScript sometimes required), never a format pandoc itself understands.
 "First-class citizen" means: `pandoc -f bike overall.bike -o out.docx` with no
