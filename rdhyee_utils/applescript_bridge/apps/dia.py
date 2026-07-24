@@ -46,6 +46,9 @@ Example:
 
 from typing import List, Optional, Dict, Any
 import json
+import math
+import re
+import threading
 import time
 
 
@@ -71,6 +74,42 @@ class DiaJavaScriptDisabled(RuntimeError):
             "(the flag does not survive a normal relaunch)"
         )
         self.original = original
+
+
+class DiaExecuteFailed(RuntimeError):
+    """Dia kept returning an empty reply -- it never ran the JavaScript.
+
+    Raised instead of returning None, because a genuine JS `null`/`undefined`
+    ALSO decodes to None. Silently conflating "Dia refused to answer" with
+    "the page said null" is how a throttled call turns into wrong data
+    downstream rather than an error.
+    """
+
+
+class IncompleteTranscriptError(RuntimeError):
+    """Scraping stopped before the end of the transcript was confirmed.
+
+    Carries whatever was collected in `.rows` so a caller can decide to use
+    the partial result -- but it must decide EXPLICITLY. Returning a short
+    list that looks complete is the failure mode this exists to prevent.
+    """
+
+    def __init__(self, reason: str, rows: List[Dict[str, str]]):
+        super().__init__(
+            f"transcript incomplete ({reason}); collected {len(rows)} segments. "
+            "Use err.rows to accept the partial transcript deliberately."
+        )
+        self.reason = reason
+        self.rows = rows
+
+
+class TranscriptUnavailable(RuntimeError):
+    """The transcript could not be reached, and it is NOT known to be absent.
+
+    Distinguishes "this video genuinely has no transcript" (an empty list)
+    from "the tab was unfocused / the panel had not rendered / the button was
+    missing" (this error). Both previously returned [].
+    """
 
 try:
     from appscript import app as appscript_app
@@ -226,9 +265,17 @@ class DiaTab:
 
     @property
     def url(self) -> str:
-        """The URL of the tab."""
-        from appscript import k
-        return self._get_props().get(k.URL, "")
+        """The URL of the tab. Always read live, never cached.
+
+        Deliberately uncached: navigation is async, so the documented
+        "poll until the url changes" pattern would otherwise latch onto the
+        first (stale) value in the property cache and spin forever.
+        """
+        try:
+            return self._raw.URL()
+        except Exception:
+            from appscript import k
+            return self._get_props().get(k.URL, "")
 
     @url.setter
     def url(self, value: str) -> None:
@@ -236,11 +283,20 @@ class DiaTab:
 
         Navigation is asynchronous and Dia keeps reporting the OLD url for a
         moment afterwards, so an immediate read-back can look like the set
-        failed when it did not. Poll (`while 'expected' not in tab.url`) or
-        wait a beat before trusting the value.
+        failed when it did not. Use wait_for_url(), or poll `tab.url` (safe --
+        the getter is uncached).
         """
         self._raw.URL.set(value)
-        self._props = None  # cached properties are now stale
+        self._props = None  # other cached properties are now stale too
+
+    def wait_for_url(self, contains: str, timeout: float = 15.0) -> bool:
+        """Block until the tab's url contains `contains`. True if it arrived."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if contains in self.url:
+                return True
+            time.sleep(0.3)
+        return contains in self.url
 
     @property
     def loading(self) -> bool:
@@ -260,12 +316,34 @@ class DiaTab:
 
     @property
     def is_focused(self) -> bool:
-        """Whether the tab is currently focused."""
-        from appscript import k
-        return self._get_props().get(k.isFocused, False)
+        """Whether the tab is currently focused. Always read live, never cached.
 
-    def focus(self) -> None:
-        """Focus on this tab, bringing its window forward if needed."""
+        Uncached deliberately: focus is exactly the kind of state that changes
+        under you (including because YOU just called focus()). A cached value
+        made focus() look like it had failed and produced spurious
+        TranscriptUnavailable errors.
+        """
+        try:
+            return bool(self._raw.isFocused())
+        except Exception:
+            from appscript import k
+            return self._get_props().get(k.isFocused, False)
+
+    def focus(self, activate: bool = True) -> None:
+        """Focus on this tab, bringing its window forward if needed.
+
+        Dia's `focus` command only reliably takes effect when Dia is the
+        FRONTMOST application. Called from a background Terminal it often does
+        nothing at all -- silently, with is_focused still False afterwards.
+        `activate=True` (default) brings Dia forward first, which is what makes
+        the command actually work. Pass activate=False if you are deliberately
+        managing app focus yourself.
+
+        Note this steals screen focus from whatever the user is doing.
+        """
+        if activate:
+            _activate_app("Dia")
+            time.sleep(0.6)
         self._raw.focus()
 
     def close(self) -> None:
@@ -283,15 +361,18 @@ class DiaTab:
         `document.title` is the 9 characters `"a title"` -- quotes included.
         You almost always want execute() instead, which decodes that.
 
-        Rate-limited: see DiaTab.MIN_EXECUTE_INTERVAL.
+        Rate-limited: see DiaTab.MIN_EXECUTE_INTERVAL. The lock spans both the
+        wait and the call, so two threads cannot wake from the same deadline
+        and fire simultaneously.
         """
-        self._throttle()
-        try:
-            return self._raw.execute(javascript=javascript)
-        except Exception as e:
-            if "enable-applescript-javascript" in str(e) or "-10006" in str(e):
-                raise DiaJavaScriptDisabled(e) from e
-            raise
+        with self._execute_lock:
+            self._throttle_locked()
+            try:
+                return self._raw.execute(javascript=javascript)
+            except Exception as e:
+                if "enable-applescript-javascript" in str(e) or "-10006" in str(e):
+                    raise DiaJavaScriptDisabled(e) from e
+                raise
 
     def execute(self, javascript: str, retries: int = 3) -> Any:
         """Run JavaScript in this tab and return the result as a Python value.
@@ -311,44 +392,59 @@ class DiaTab:
 
         Requires the --enable-applescript-javascript launch flag; see
         DiaJavaScriptDisabled.
+        Raises DiaExecuteFailed if Dia keeps returning an empty reply. It does
+        NOT return None in that case: genuine JS null decodes to None too, and
+        conflating the two turns a throttle failure into silent wrong data.
         """
         for attempt in range(retries + 1):
             raw = self.execute_raw(javascript)
             if raw:
                 return json.loads(raw)
             # Empty reply == throttled (see MIN_EXECUTE_INTERVAL). A genuine
-            # empty-string JS result would come back as '""', never ''. Back
-            # off and retry rather than silently returning None.
+            # empty-string JS result would come back as '""', never ''.
             if attempt < retries:
                 time.sleep(self.MIN_EXECUTE_INTERVAL * (attempt + 1))
-        return None
+        raise DiaExecuteFailed(
+            f"Dia returned an empty reply {retries + 1} times; the JavaScript "
+            "never ran. Usually means calls are coming faster than "
+            f"MIN_EXECUTE_INTERVAL ({self.MIN_EXECUTE_INTERVAL}s), possibly "
+            "from another process driving Dia concurrently."
+        )
 
     # Dia silently returns an empty reply if execute() is called too soon
     # after the previous one -- no error, no warning, just ''. Measured
     # 2026-07-24: <=0.6s apart fails, >=0.8s succeeds, and once it starts
     # failing it stays broken until a full ~1s gap. 1.0s is the safe floor.
     MIN_EXECUTE_INTERVAL = 1.0
-    _last_execute_at = 0.0  # class-level: the limit is Dia's, not per-tab
+    # Class-level: the limit belongs to Dia, not to a tab. monotonic() so a
+    # wall-clock adjustment cannot produce a premature call or a huge sleep.
+    _last_execute_at = 0.0
+    _execute_lock = threading.RLock()
 
     @classmethod
-    def _throttle(cls) -> None:
-        """Sleep as needed to keep calls MIN_EXECUTE_INTERVAL apart."""
-        wait = cls.MIN_EXECUTE_INTERVAL - (time.time() - cls._last_execute_at)
+    def _throttle_locked(cls) -> None:
+        """Sleep to keep calls MIN_EXECUTE_INTERVAL apart. Call under the lock.
+
+        Note this only coordinates callers in THIS process. Another process
+        (or a stray osascript) driving Dia can still trip the limit, which is
+        why execute() retries rather than trusting the throttle alone.
+        """
+        wait = cls.MIN_EXECUTE_INTERVAL - (time.monotonic() - cls._last_execute_at)
         if wait > 0:
             time.sleep(wait)
-        cls._last_execute_at = time.time()
+        cls._last_execute_at = time.monotonic()
 
     @property
     def javascript_enabled(self) -> bool:
         """Whether Dia will accept execute() calls (i.e. was the flag set?).
 
         Cheap probe -- useful for failing early with a clear message rather
-        than deep inside a scraping routine.
+        than deep inside a scraping routine. Verifies the probe's actual VALUE,
+        so a throttled/empty reply reports False rather than a false True.
         """
         try:
-            self.execute("1")
-            return True
-        except DiaJavaScriptDisabled:
+            return self.execute("1") == 1
+        except (DiaJavaScriptDisabled, DiaExecuteFailed):
             return False
 
     # ------------------------------------------------------------------
@@ -385,18 +481,32 @@ class DiaTab:
     #                                              so a single read truncates
     # _read() below handles either; the virtualised one additionally needs the
     # panel scrolled to page the rest of the segments in.
+    # CRITICAL: only VISIBLE segments count. YouTube is a single-page app and
+    # leaves the previous video's transcript panel in the DOM (hidden) after
+    # you navigate. Reading document-wide therefore returns the WRONG VIDEO's
+    # transcript -- observed 2026-07-24 on a Short, which confidently produced
+    # 98 segments belonging to the previously-viewed video. Wrong data is worse
+    # than no data, so height>0 is the discriminator: live panels have layout,
+    # stale ones are display:none.
     _YT_READ_FN = """
-      const _read = () => {
-        const olds = [...document.querySelectorAll('ytd-transcript-segment-renderer')];
-        if (olds.length) return olds.map(s => ({
+      const _vis = e => e.getBoundingClientRect().height > 0;
+      // Returns {renderer, rows}. The RENDERER MATTERS: 'old' puts the whole
+      // transcript in the DOM, so one read is complete and scrolling adds
+      // nothing -- which must not be mistaken for "stalled". 'new' is
+      // virtualised and genuinely requires scrolling to the end.
+      const _readAll = () => {
+        const olds = [...document.querySelectorAll('ytd-transcript-segment-renderer')].filter(_vis);
+        if (olds.length) return {renderer: 'old', rows: olds.map(s => ({
           ts:   (s.querySelector('.segment-timestamp')?.textContent || '').trim(),
           text: (s.querySelector('.segment-text')?.textContent || '').trim()
-        })).filter(r => r.text);
-        return [...document.querySelectorAll('transcript-segment-view-model')].map(s => ({
+        })).filter(r => r.text)};
+        const news = [...document.querySelectorAll('transcript-segment-view-model')].filter(_vis);
+        return {renderer: news.length ? 'new' : 'none', rows: news.map(s => ({
           ts:   (s.querySelector('.ytwTranscriptSegmentViewModelTimestamp')?.textContent || '').trim(),
           text: (s.querySelector('.ytAttributedStringHost')?.textContent || '').trim()
-        })).filter(r => r.text);
+        })).filter(r => r.text)};
       };
+      const _read = () => _readAll().rows;
     """
 
     # Expand the description, then click a *visible* "Show transcript".
@@ -430,16 +540,25 @@ class DiaTab:
         """
     (() => {
       %s
-      const rows = _read();
+      const {renderer, rows} = _readAll();
       let sc = null;
-      const seg = document.querySelector('transcript-segment-view-model, ytd-transcript-segment-renderer');
+      // Anchor on a VISIBLE segment. Anchoring on any segment can land on a
+      // stale hidden panel from a previous SPA navigation, whose ancestors
+      // never scroll -- which looks exactly like "stagnation" and aborts a
+      // perfectly good scrape.
+      const seg = [...document.querySelectorAll('transcript-segment-view-model, ytd-transcript-segment-renderer')]
+        .find(_vis);
       for (let e = seg; e; e = e.parentElement) {
         if (e.scrollHeight > e.clientHeight + 20) { sc = e; break; }
       }
-      if (!sc) return {rows, atEnd: true, scrollable: false};
+      // 'old' renderer: the entire transcript is already in the DOM, so this
+      // single read IS the whole thing regardless of scrolling.
+      if (renderer === 'old') return {renderer, rows, atEnd: true, scrollable: false};
+      if (!sc) return {renderer, rows, atEnd: true, scrollable: false};
       const before = sc.scrollTop;
       sc.scrollTop = before + Math.max(sc.clientHeight * 0.8, 200);
       return {
+        renderer,
         rows,
         scrollTop: before,
         scrollHeight: sc.scrollHeight,
@@ -452,14 +571,25 @@ class DiaTab:
         % _YT_READ_FN
     )
 
+    _TS_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})$|^(\d{1,2}):(\d{2})$")
+
     @staticmethod
     def _ts_seconds(ts: str) -> int:
-        """'12:30' -> 750, '1:02:03' -> 3723. Used to order scraped segments."""
-        parts = [int(p) for p in ts.split(":") if p.strip().isdigit()]
-        secs = 0
-        for p in parts:
-            secs = secs * 60 + p
-        return secs
+        """'12:30' -> 750, '1:02:03' -> 3723. Used to order scraped segments.
+
+        Validates strictly and raises ValueError on anything malformed. An
+        earlier version discarded non-numeric components instead, which turned
+        '1:x:03' into 63 and 'not-a-time' into 0 -- plausible numbers that
+        silently reorder the transcript rather than announcing a problem.
+        """
+        m = DiaTab._TS_RE.match((ts or "").strip())
+        if not m:
+            raise ValueError(f"malformed timestamp: {ts!r}")
+        h, mm, ss = (m.group(1), m.group(2), m.group(3)) if m.group(3) else (None, m.group(4), m.group(5))
+        minutes, seconds = int(mm), int(ss)
+        if seconds > 59 or (h is not None and minutes > 59):
+            raise ValueError(f"timestamp component out of range: {ts!r}")
+        return (int(h) if h else 0) * 3600 + minutes * 60 + seconds
 
     def youtube_state(self) -> Dict[str, Any]:
         """Read the <video> element's state: currentTime, duration, paused, rate."""
@@ -470,10 +600,16 @@ class DiaTab:
 
         Works on any page with a <video> element, not just YouTube.
         """
+        seconds = float(seconds)
+        # float() alone makes interpolation injection-safe, but nan/inf render
+        # as bare `nan`/`inf`, which are undefined identifiers in JS and blow
+        # up with a ReferenceError inside the page.
+        if not math.isfinite(seconds):
+            raise ValueError(f"seek() needs a finite number of seconds, got {seconds!r}")
         return self.execute(
             "(() => { const v = document.querySelector('video');"
             "  if (!v) return null;"
-            f" v.currentTime = {float(seconds)};"
+            f" v.currentTime = {seconds};"
             "  return Number.isFinite(v.currentTime) ? v.currentTime : null; })()"
         )
 
@@ -508,35 +644,98 @@ class DiaTab:
 
         This opens the transcript panel in the real browser and leaves it
         open -- a visible side effect, not a background read.
+
+        Raises:
+            TranscriptUnavailable: the transcript could not be reached and is
+                NOT known to be absent (tab unfocused, panel never rendered,
+                button missing). An empty list means "verified: this video has
+                no transcript" -- the two are no longer conflated.
+            IncompleteTranscriptError: scraping stopped before the end of the
+                list was confirmed. `err.rows` carries the partial result so a
+                caller can accept it deliberately.
         """
+        # Precondition: YouTube renders no transcript UI in a background tab,
+        # which previously surfaced as a confident, wrong "no transcript".
+        if not self.is_focused:
+            self.focus()
+            time.sleep(1.5)
+            if not self.is_focused:
+                raise TranscriptUnavailable(
+                    "tab is not focused; YouTube does not render the transcript "
+                    "UI in a background tab, so any result would be a false "
+                    "'no transcript'."
+                )
+
         if open_panel:
-            opened = self.execute(self._YT_OPEN_JS) or {}
+            opened = self.execute(self._YT_OPEN_JS)
             if opened.get("noButton"):
-                return []
+                raise TranscriptUnavailable(
+                    "no 'Show transcript' button found. Either this video has "
+                    "no transcript, or the page had not finished rendering. "
+                    "These are indistinguishable from here -- retry once the "
+                    "page has settled before concluding it has none."
+                )
 
         # Dedup on (ts, text), NOT ts alone: duplicate panels produce identical
         # pairs and collapse correctly, while a genuine second line sharing a
         # timestamp is preserved rather than silently dropped.
         seen: Dict[tuple, None] = {}
+        reached_end = False
         stagnant = 0
-        for _ in range(max_scrolls):
-            res = self.execute(self._YT_SCRAPE_JS) or {}
+        scrolls = 0
+
+        for scrolls in range(1, max_scrolls + 1):
+            res = self.execute(self._YT_SCRAPE_JS)
             rows = res.get("rows") or []
             before = len(seen)
             for r in rows:
                 if r.get("ts") and r.get("text"):
                     seen.setdefault((r["ts"], r["text"]), None)
-            if res.get("atEnd") or not res.get("scrollable", True):
+
+            if res.get("atEnd"):
+                reached_end = True
+                break
+            if not res.get("scrollable", True):
+                # No scroll container. Conclusive only for the non-virtualised
+                # rendering, where the whole transcript is already in the DOM.
+                reached_end = bool(rows)
                 break
             stagnant = stagnant + 1 if len(seen) == before else 0
             if stagnant >= 3:
                 break
 
-        # Stable sort by timestamp keeps same-ts lines in discovery order.
-        return [
-            {"ts": ts, "text": text}
-            for ts, text in sorted(seen, key=lambda p: self._ts_seconds(p[0]))
-        ]
+        ordered = self._order_rows(seen)
+
+        if not reached_end:
+            reason = (
+                f"hit max_scrolls={max_scrolls}"
+                if scrolls >= max_scrolls
+                else f"{stagnant} scrolls yielded nothing new before reaching the end"
+            )
+            raise IncompleteTranscriptError(reason, ordered)
+
+        if not ordered and open_panel:
+            # Panel opened but nothing rendered: not proof of absence.
+            raise TranscriptUnavailable(
+                "transcript panel opened but rendered no segments; the page may "
+                "still be loading."
+            )
+        return ordered
+
+    def _order_rows(self, seen) -> List[Dict[str, str]]:
+        """Sort collected (ts, text) pairs by timestamp, tolerating oddities.
+
+        A single malformed timestamp should not abort a 500-segment scrape, so
+        unparseable rows sort to the end rather than raising -- but they are
+        kept, not dropped.
+        """
+        def key(pair):
+            try:
+                return (0, self._ts_seconds(pair[0]))
+            except ValueError:
+                return (1, 0)
+
+        return [{"ts": ts, "text": text} for ts, text in sorted(seen, key=key)]
 
     @staticmethod
     def transcript_to_text(rows: List[Dict[str, str]], every: int = 1) -> str:
@@ -544,8 +743,11 @@ class DiaTab:
 
         `every=N` keeps one timestamp per N segments, which cuts the token
         cost of a long transcript without losing the ability to cite roughly
-        where something was said.
+        where something was said. NOTE: this drops only TIMESTAMPS, never
+        transcript text -- all text is preserved regardless of `every`.
         """
+        if not isinstance(every, int) or every < 1:
+            raise ValueError(f"every must be a positive int, got {every!r}")
         out = []
         for i, r in enumerate(rows):
             if i % every == 0:
