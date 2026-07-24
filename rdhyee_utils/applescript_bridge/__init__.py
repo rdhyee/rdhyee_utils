@@ -24,7 +24,7 @@ Example usage:
 from .sdef_parser import SDEFParser, SDEFCommand, SDEFClass, SDEFProperty
 from .runtime import AppleScriptRuntime, execute_applescript
 from .codegen import generate_bindings, generate_static_module
-from .apps import Dia, Atlas, Comet
+from .apps import Dia, Atlas, Comet, DiaJavaScriptDisabled
 
 __all__ = [
     # SDEF parsing
@@ -40,6 +40,7 @@ __all__ = [
     "generate_static_module",
     # Pre-built app bindings
     "Dia",
+    "DiaJavaScriptDisabled",
     "Atlas",
     "Comet",
 ]

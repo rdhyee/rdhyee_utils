@@ -9,7 +9,7 @@ The DEVONthink adapter lives on the `feat/devonthink-adapter` branch and adds
 its own imports here when merged.
 """
 
-from .dia import Dia, DiaWindow, DiaTab
+from .dia import Dia, DiaWindow, DiaTab, DiaJavaScriptDisabled
 from .atlas import Atlas, AtlasWindow, AtlasTab
 from .comet import Comet, CometWindow, CometTab
 
@@ -17,6 +17,7 @@ __all__ = [
     "Dia",
     "DiaWindow",
     "DiaTab",
+    "DiaJavaScriptDisabled",
     "Atlas",
     "AtlasWindow",
     "AtlasTab",

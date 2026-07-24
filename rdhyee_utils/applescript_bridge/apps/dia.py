@@ -45,7 +45,32 @@ Example:
 """
 
 from typing import List, Optional, Dict, Any
+import json
 import time
+
+
+class DiaJavaScriptDisabled(RuntimeError):
+    """Raised when Dia was launched without --enable-applescript-javascript.
+
+    Dia gates its AppleScript `execute` command behind a launch flag. Unlike
+    Chrome/Comet (a View > Developer menu toggle), this cannot be switched on
+    from inside a running app -- Dia must be quit and relaunched:
+
+        open -a Dia --args --enable-applescript-javascript
+
+    The flag does NOT persist. A normal relaunch silently drops it, and every
+    execute() call starts failing again with AppleScript error -10006.
+    """
+
+    RELAUNCH_CMD = "open -a Dia --args --enable-applescript-javascript"
+
+    def __init__(self, original: Optional[Exception] = None):
+        super().__init__(
+            "Dia's JavaScript execution is disabled. Quit Dia and relaunch with:\n"
+            f"    {self.RELAUNCH_CMD}\n"
+            "(the flag does not survive a normal relaunch)"
+        )
+        self.original = original
 
 try:
     from appscript import app as appscript_app
@@ -205,6 +230,28 @@ class DiaTab:
         from appscript import k
         return self._get_props().get(k.URL, "")
 
+    @url.setter
+    def url(self, value: str) -> None:
+        """Navigate this tab. `URL` is read/write in Dia's dictionary.
+
+        Navigation is asynchronous and Dia keeps reporting the OLD url for a
+        moment afterwards, so an immediate read-back can look like the set
+        failed when it did not. Poll (`while 'expected' not in tab.url`) or
+        wait a beat before trusting the value.
+        """
+        self._raw.URL.set(value)
+        self._props = None  # cached properties are now stale
+
+    @property
+    def loading(self) -> bool:
+        """Whether the tab is currently loading."""
+        from appscript import k
+        # Not cached -- the whole point is that it changes.
+        try:
+            return bool(self._raw.loading())
+        except Exception:
+            return self._get_props().get(k.loading, False)
+
     @property
     def is_pinned(self) -> bool:
         """Whether the tab is pinned."""
@@ -220,6 +267,292 @@ class DiaTab:
     def focus(self) -> None:
         """Focus on this tab, bringing its window forward if needed."""
         self._raw.focus()
+
+    def close(self) -> None:
+        """Close this tab."""
+        self._raw.close()
+
+    # ------------------------------------------------------------------
+    # JavaScript execution (requires --enable-applescript-javascript)
+    # ------------------------------------------------------------------
+
+    def execute_raw(self, javascript: str) -> str:
+        """Run JavaScript and return Dia's raw reply text, unparsed.
+
+        Dia JSON-encodes whatever the JS evaluates to, so the reply for
+        `document.title` is the 9 characters `"a title"` -- quotes included.
+        You almost always want execute() instead, which decodes that.
+
+        Rate-limited: see DiaTab.MIN_EXECUTE_INTERVAL.
+        """
+        self._throttle()
+        try:
+            return self._raw.execute(javascript=javascript)
+        except Exception as e:
+            if "enable-applescript-javascript" in str(e) or "-10006" in str(e):
+                raise DiaJavaScriptDisabled(e) from e
+            raise
+
+    def execute(self, javascript: str, retries: int = 3) -> Any:
+        """Run JavaScript in this tab and return the result as a Python value.
+
+        Dia serialises the JS result as JSON before handing it back over
+        AppleScript, so objects and arrays survive the trip intact and there
+        is NO need to call JSON.stringify() yourself:
+
+            >>> tab.execute("document.title")
+            'Opus 5 is FINALLY here! (WOAH) - YouTube'
+            >>> tab.execute("({a: 1, b: [1, 2]})")
+            {'a': 1, 'b': [1, 2]}
+            >>> tab.execute("1 + 1")
+            2
+
+        `undefined` comes back as None (Dia encodes it as JSON null).
+
+        Requires the --enable-applescript-javascript launch flag; see
+        DiaJavaScriptDisabled.
+        """
+        for attempt in range(retries + 1):
+            raw = self.execute_raw(javascript)
+            if raw:
+                return json.loads(raw)
+            # Empty reply == throttled (see MIN_EXECUTE_INTERVAL). A genuine
+            # empty-string JS result would come back as '""', never ''. Back
+            # off and retry rather than silently returning None.
+            if attempt < retries:
+                time.sleep(self.MIN_EXECUTE_INTERVAL * (attempt + 1))
+        return None
+
+    # Dia silently returns an empty reply if execute() is called too soon
+    # after the previous one -- no error, no warning, just ''. Measured
+    # 2026-07-24: <=0.6s apart fails, >=0.8s succeeds, and once it starts
+    # failing it stays broken until a full ~1s gap. 1.0s is the safe floor.
+    MIN_EXECUTE_INTERVAL = 1.0
+    _last_execute_at = 0.0  # class-level: the limit is Dia's, not per-tab
+
+    @classmethod
+    def _throttle(cls) -> None:
+        """Sleep as needed to keep calls MIN_EXECUTE_INTERVAL apart."""
+        wait = cls.MIN_EXECUTE_INTERVAL - (time.time() - cls._last_execute_at)
+        if wait > 0:
+            time.sleep(wait)
+        cls._last_execute_at = time.time()
+
+    @property
+    def javascript_enabled(self) -> bool:
+        """Whether Dia will accept execute() calls (i.e. was the flag set?).
+
+        Cheap probe -- useful for failing early with a clear message rather
+        than deep inside a scraping routine.
+        """
+        try:
+            self.execute("1")
+            return True
+        except DiaJavaScriptDisabled:
+            return False
+
+    # ------------------------------------------------------------------
+    # YouTube helpers -- verified against youtube.com on 2026-07-24
+    # ------------------------------------------------------------------
+
+    # No JSON.stringify anywhere below -- Dia JSON-encodes the result for us.
+    # Each execute() costs ~1s (see MIN_EXECUTE_INTERVAL), so these scripts are
+    # written to do as much as possible per round-trip.
+
+    # NaN is DROPPED by Dia's JSON encoder -- the key vanishes from the result
+    # rather than arriving as null. video.duration is NaN until metadata loads,
+    # so `num()` normalises it or youtube_state() comes back missing 'duration'
+    # and callers KeyError. Same for currentTime on a fresh page.
+    _YT_STATE_JS = """
+    (() => {
+      const v = document.querySelector('video');
+      const num = x => (typeof x === 'number' && Number.isFinite(x)) ? x : null;
+      return {
+        title: document.title,
+        url: location.href,
+        hasVideo: !!v,
+        currentTime:  v ? num(v.currentTime)  : null,
+        duration:     v ? num(v.duration)     : null,
+        paused:       v ? v.paused            : null,
+        playbackRate: v ? num(v.playbackRate) : null
+      };
+    })()
+    """
+
+    # YouTube ships TWO transcript renderings and you will meet both:
+    #   old: <ytd-transcript-segment-renderer>  -- whole transcript in the DOM
+    #   new: <transcript-segment-view-model>    -- VIRTUALISED, ~98 nodes max,
+    #                                              so a single read truncates
+    # _read() below handles either; the virtualised one additionally needs the
+    # panel scrolled to page the rest of the segments in.
+    _YT_READ_FN = """
+      const _read = () => {
+        const olds = [...document.querySelectorAll('ytd-transcript-segment-renderer')];
+        if (olds.length) return olds.map(s => ({
+          ts:   (s.querySelector('.segment-timestamp')?.textContent || '').trim(),
+          text: (s.querySelector('.segment-text')?.textContent || '').trim()
+        })).filter(r => r.text);
+        return [...document.querySelectorAll('transcript-segment-view-model')].map(s => ({
+          ts:   (s.querySelector('.ytwTranscriptSegmentViewModelTimestamp')?.textContent || '').trim(),
+          text: (s.querySelector('.ytAttributedStringHost')?.textContent || '').trim()
+        })).filter(r => r.text);
+      };
+    """
+
+    # Expand the description, then click a *visible* "Show transcript".
+    # The button exists while the description is collapsed but is 0x0, and
+    # clicking it then does nothing -- silently. That is the trap here.
+    _YT_OPEN_JS = (
+        """
+    (() => {
+      %s
+      if (_read().length) return {alreadyOpen: true};
+      const exp = document.querySelector('#expand');
+      if (exp) exp.click();
+      const vis = b => b.getBoundingClientRect().height > 0;
+      const btn = [...document.querySelectorAll('button, tp-yt-paper-button, yt-button-shape button')]
+        .filter(b => /transcript/i.test(b.getAttribute('aria-label') || '')
+                  || /transcript/i.test(b.textContent || ''))
+        .filter(b => !/close/i.test(b.getAttribute('aria-label') || ''))
+        .sort((a, b) => (vis(b) ? 1 : 0) - (vis(a) ? 1 : 0))[0];
+      if (!btn) return {noButton: true, expanded: !!exp};
+      btn.click();
+      return {clicked: true, wasVisible: vis(btn), expanded: !!exp};
+    })()
+    """
+        % _YT_READ_FN
+    )
+
+    # Read the current window of segments, then scroll one page forward so the
+    # next call sees fresh ones. Returns enough state for the caller to know
+    # when it has reached the bottom.
+    _YT_SCRAPE_JS = (
+        """
+    (() => {
+      %s
+      const rows = _read();
+      let sc = null;
+      const seg = document.querySelector('transcript-segment-view-model, ytd-transcript-segment-renderer');
+      for (let e = seg; e; e = e.parentElement) {
+        if (e.scrollHeight > e.clientHeight + 20) { sc = e; break; }
+      }
+      if (!sc) return {rows, atEnd: true, scrollable: false};
+      const before = sc.scrollTop;
+      sc.scrollTop = before + Math.max(sc.clientHeight * 0.8, 200);
+      return {
+        rows,
+        scrollTop: before,
+        scrollHeight: sc.scrollHeight,
+        clientHeight: sc.clientHeight,
+        atEnd: before + sc.clientHeight >= sc.scrollHeight - 5,
+        scrollable: true
+      };
+    })()
+    """
+        % _YT_READ_FN
+    )
+
+    @staticmethod
+    def _ts_seconds(ts: str) -> int:
+        """'12:30' -> 750, '1:02:03' -> 3723. Used to order scraped segments."""
+        parts = [int(p) for p in ts.split(":") if p.strip().isdigit()]
+        secs = 0
+        for p in parts:
+            secs = secs * 60 + p
+        return secs
+
+    def youtube_state(self) -> Dict[str, Any]:
+        """Read the <video> element's state: currentTime, duration, paused, rate."""
+        return self.execute(self._YT_STATE_JS)
+
+    def seek(self, seconds: float) -> Optional[float]:
+        """Jump the video to `seconds`. Returns the resulting currentTime.
+
+        Works on any page with a <video> element, not just YouTube.
+        """
+        return self.execute(
+            "(() => { const v = document.querySelector('video');"
+            "  if (!v) return null;"
+            f" v.currentTime = {float(seconds)};"
+            "  return Number.isFinite(v.currentTime) ? v.currentTime : null; })()"
+        )
+
+    def youtube_transcript(
+        self, open_panel: bool = True, max_scrolls: int = 40
+    ) -> List[Dict[str, str]]:
+        """Return the full video transcript as [{'ts': '12:30', 'text': ...}, ...].
+
+        Handles both of YouTube's transcript renderings, including the newer
+        virtualised one that keeps only ~98 segments in the DOM at a time --
+        this scrolls the panel and accumulates until it reaches the bottom.
+
+            >>> rows = tab.youtube_transcript()
+            >>> len(rows)
+            498
+            >>> rows[0]
+            {'ts': '0:00', 'text': "I know it's crazy, but there are people..."}
+
+        Each round trip costs ~1s (see MIN_EXECUTE_INTERVAL), so a long video
+        takes a few seconds. Returns [] if the video has no transcript, which
+        is common -- check before assuming failure.
+
+        IMPORTANT preconditions, both learned the hard way:
+          * The tab must be FOCUSED. YouTube does not render the description
+            or transcript controls in a background tab, so this silently
+            returns [] on an unfocused tab even though the video is loaded.
+            Call tab.focus() and give it a couple of seconds first.
+          * Opening the panel more than once leaves MULTIPLE
+            ytd-transcript-segment-list-renderer copies in the DOM, each with
+            the full transcript. A naive count double-counts (996 nodes for a
+            498-segment video). The (ts, text) dedup below absorbs that.
+
+        This opens the transcript panel in the real browser and leaves it
+        open -- a visible side effect, not a background read.
+        """
+        if open_panel:
+            opened = self.execute(self._YT_OPEN_JS) or {}
+            if opened.get("noButton"):
+                return []
+
+        # Dedup on (ts, text), NOT ts alone: duplicate panels produce identical
+        # pairs and collapse correctly, while a genuine second line sharing a
+        # timestamp is preserved rather than silently dropped.
+        seen: Dict[tuple, None] = {}
+        stagnant = 0
+        for _ in range(max_scrolls):
+            res = self.execute(self._YT_SCRAPE_JS) or {}
+            rows = res.get("rows") or []
+            before = len(seen)
+            for r in rows:
+                if r.get("ts") and r.get("text"):
+                    seen.setdefault((r["ts"], r["text"]), None)
+            if res.get("atEnd") or not res.get("scrollable", True):
+                break
+            stagnant = stagnant + 1 if len(seen) == before else 0
+            if stagnant >= 3:
+                break
+
+        # Stable sort by timestamp keeps same-ts lines in discovery order.
+        return [
+            {"ts": ts, "text": text}
+            for ts, text in sorted(seen, key=lambda p: self._ts_seconds(p[0]))
+        ]
+
+    @staticmethod
+    def transcript_to_text(rows: List[Dict[str, str]], every: int = 1) -> str:
+        """Flatten transcript rows into timestamped lines for prompting/notes.
+
+        `every=N` keeps one timestamp per N segments, which cuts the token
+        cost of a long transcript without losing the ability to cite roughly
+        where something was said.
+        """
+        out = []
+        for i, r in enumerate(rows):
+            if i % every == 0:
+                out.append(f"[{r['ts']}] {r['text']}")
+            else:
+                out.append(r["text"])
+        return "\n".join(out)
 
     def __repr__(self) -> str:
         return f"<DiaTab: {self.title}>"
