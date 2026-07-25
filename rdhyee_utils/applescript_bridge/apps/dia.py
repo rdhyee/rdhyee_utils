@@ -201,6 +201,32 @@ def _is_dia_generating(window, depth: int = 0, max_depth: int = 20) -> bool:
     return False
 
 
+def _ax_point(element, attribute: str):
+    """Unpack an AXPosition/AXSize into a plain (x, y) / (w, h) tuple.
+
+    These come back as opaque AXValue handles, not numbers -- printing one
+    gives '<AXValue 0x...>'. AXValueGetValue is the only way through.
+    """
+    if not HAS_PYOBJC:
+        return None
+    from ApplicationServices import (
+        AXValueGetValue,
+        kAXValueCGPointType,
+        kAXValueCGSizeType,
+    )
+
+    value = _get_ax_attribute(element, attribute)
+    if value is None:
+        return None
+    kind = kAXValueCGPointType if attribute == "AXPosition" else kAXValueCGSizeType
+    ok, out = AXValueGetValue(value, kind, None)
+    if not ok:
+        return None
+    return (round(out.x), round(out.y)) if kind == kAXValueCGPointType else (
+        round(out.width), round(out.height)
+    )
+
+
 def _activate_app(app_name: str) -> bool:
     """Bring an application to the foreground."""
     if not HAS_PYOBJC:
@@ -1088,6 +1114,97 @@ class Dia:
             return False
 
         return _is_dia_generating(windows[0])
+
+    # Chat-sidebar message bubbles are AXTextAreas with NO AXIdentifier. The
+    # two that DO have one are chrome, not conversation, and must be excluded:
+    #   navigationBarAssistantBarTextField -- the URL/assistant bar
+    #   commandBarTextField                -- the "Ask another question..." box
+    _CHAT_CHROME_IDENTIFIERS = ("commandBarTextField", "navigationBarAssistantBarTextField")
+
+    def read_conversation(self, role_tolerance: int = 8) -> List[Dict[str, Any]]:
+        """Read the WHOLE chat sidebar conversation, not just the last reply.
+
+        Returns turns in display order:
+
+            [{'role': 'assistant'|'user', 'text': ..., 'x': int, 'y': int}, ...]
+
+        read_dia_response() returns only the final message; this recovers the
+        entire exchange, which is what makes Dia usable as a co-reader whose
+        sessions can be filed into notes.
+
+        HOW ROLES ARE DETERMINED -- read this before trusting them. Dia exposes
+        no semantic marker: both roles have identical AXRoleDescription and an
+        identical ancestor chain. The ONLY signal is geometry. Dia's own
+        messages are flush with the content's left edge and span its full
+        width; the user's are indented and right-aligned. So: the leftmost x
+        (within `role_tolerance` px) is the assistant, anything indented is the
+        user.
+
+        Consequences worth knowing:
+          * A conversation containing exactly ONE message is ambiguous -- it
+            defines the left edge, so it is reported as 'assistant'.
+          * A Dia redesign that changes bubble alignment silently flips roles.
+            `x` is returned on every turn so callers can sanity-check.
+
+        Messages scrolled out of view are included (their y is negative), but
+        if Dia ever virtualises a long conversation, older turns simply will
+        not be in the tree -- this returns what is rendered, and cannot tell
+        you that something older existed. Do not treat the first turn as
+        proof of the start of the conversation.
+        """
+        if not HAS_PYOBJC:
+            return []
+        pid = _get_pid_for_app(self.APP_NAME)
+        if pid is None:
+            return []
+        windows = _get_ax_attribute(AXUIElementCreateApplication(pid), "AXWindows")
+        if not windows:
+            return []
+
+        found: List[Dict[str, Any]] = []
+
+        def visit(element, depth: int = 0):
+            if depth > 26:
+                return
+            if (_get_ax_attribute(element, "AXRole") or "") == "AXTextArea":
+                ident = _get_ax_attribute(element, "AXIdentifier") or ""
+                text = str(_get_ax_attribute(element, "AXValue") or "")
+                if text.strip() and ident not in self._CHAT_CHROME_IDENTIFIERS and not ident:
+                    pos = _ax_point(element, "AXPosition")
+                    size = _ax_point(element, "AXSize")
+                    if pos:
+                        found.append(
+                            {"text": text.strip(), "x": pos[0], "y": pos[1],
+                             "width": size[0] if size else 0}
+                        )
+            for child in _get_ax_attribute(element, "AXChildren") or []:
+                visit(child, depth + 1)
+
+        visit(windows[0])
+        if not found:
+            return []
+
+        content_left = min(m["x"] for m in found)
+        found.sort(key=lambda m: m["y"])
+        return [
+            {
+                "role": "assistant" if m["x"] - content_left <= role_tolerance else "user",
+                "text": m["text"],
+                "x": m["x"],
+                "y": m["y"],
+            }
+            for m in found
+        ]
+
+    @staticmethod
+    def conversation_to_markdown(turns: List[Dict[str, Any]], heading: str = "") -> str:
+        """Render read_conversation() output as markdown for filing into notes."""
+        lines = [f"# {heading}", ""] if heading else []
+        for t in turns:
+            who = "**Dia**" if t["role"] == "assistant" else "**Me**"
+            body = t["text"].replace("\n", "\n> ")
+            lines.append(f"{who}:\n> {body}\n")
+        return "\n".join(lines)
 
     def read_dia_response(
         self,
