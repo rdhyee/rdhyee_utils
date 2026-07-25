@@ -718,6 +718,16 @@ class DiaTab:
                 if r.get("ts") and r.get("text"):
                     seen.setdefault((r["ts"], r["text"]), None)
 
+            # The 'old' rendering holds the ENTIRE transcript in the DOM, so a
+            # single read is complete by construction and scrolling can only
+            # ever return the same rows. Decided here in Python rather than
+            # left to the injected JS: a completeness rule that lives only in
+            # the page script cannot be unit-tested, and this specific rule
+            # once cost a complete 498-segment scrape by making it look
+            # stalled. The JS short-circuit is now belt-and-braces.
+            if res.get("renderer") == "old":
+                reached_end = True
+                break
             if res.get("atEnd"):
                 reached_end = True
                 break
@@ -1181,11 +1191,22 @@ class Dia:
                 visit(child, depth + 1)
 
         visit(windows[0])
+        return self._classify_turns(found, role_tolerance)
+
+    @staticmethod
+    def _classify_turns(
+        found: List[Dict[str, Any]], role_tolerance: int = 8
+    ) -> List[Dict[str, Any]]:
+        """Order raw bubbles by y and assign roles from x. Pure -- unit-testable.
+
+        Split out from read_conversation deliberately: this geometric heuristic
+        is the fragile part (see that method's docstring), so it is kept free
+        of Accessibility calls and can be exercised against fixtures.
+        """
         if not found:
             return []
-
         content_left = min(m["x"] for m in found)
-        found.sort(key=lambda m: m["y"])
+        ordered = sorted(found, key=lambda m: m["y"])
         return [
             {
                 "role": "assistant" if m["x"] - content_left <= role_tolerance else "user",
@@ -1193,7 +1214,7 @@ class Dia:
                 "x": m["x"],
                 "y": m["y"],
             }
-            for m in found
+            for m in ordered
         ]
 
     @staticmethod
